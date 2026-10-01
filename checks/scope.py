@@ -44,9 +44,20 @@ EXPECTED = {
     "core": {"view", "node", "edge", "provenance", "__init__"},
     "analysis": {"consensus", "divergence", "focus", "synthesis", "__init__"},
     "metrics": {"coverage", "compression", "__init__"},
+    # ⚠️ `corpus` 同样是**放进去时才解释的**：
+    # 前面四组各自在一个（或几个）配置上判一次，而「每条结论都在一整片配置上
+    # 撞一遍、并报出反例」是另一件事 —— 上一轮的量出证据是：
+    # 所有结论都只在**一个标题配置**上验过，而那个配置所在的语言库
+    # 可达率只有 38%、形状覆盖近乎为零。**一个点上的结论和一个扫描过的结论，
+    # 在报告里长得一样。**
     "checks": {"identity", "interference", "reconstruction", "ablation",
-               "__init__", "__main__", "scope"},
-    "generators": {"synthetic", "__init__"},
+               "__init__", "__main__", "scope", "corpus"},
+    # ⚠️ `topology` 是**放进去时才解释的**（这条检查的作用正是逼我解释一句）：
+    # 语料库的「骨架长什么样」与「视图怎么构造并植入」是两件事，
+    # 混在一个 700 行的文件里以后没人分得清改了哪个。
+    # 拆出来的直接动因：上一轮量出语料库只会造连通的随机图，
+    # 于是 §十一 的焦点机制全程空转（1416 条分歧塌成 1 个焦点）。
+    "generators": {"synthetic", "topology", "__init__"},
     "tests": {"test_dce", "run_tests"},
 }
 

@@ -290,6 +290,39 @@ def test_section20_scope_assertions_pass():
         assert ok, f"{title} 红了：{detail}"
 
 
+def test_corpus_counterexample_scan_passes():
+    """**反例扫描**：每条「必须处处成立」的结论拿到 700 个配置上撞一遍。
+
+    上一轮的全部结论都只在**一个标题配置**上验过，而那个配置所在的语料库
+    可达率只有 38%、形状覆盖近乎为零。一个点上的结论和一个扫描过的结论，
+    在报告里长得一样 —— 这个测试就是用来分开它们的。
+    """
+    from checks import corpus
+    for title, ok, detail in corpus.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_recall_gap_is_explained_by_reclassification():
+    """交叠配置下 strict 召回会掉，但**真漏必须是 0**。
+
+    ⚠️ 这条钉的是本仓库对 §十五 Test 3 的收紧：
+    「植入 10/20/10/5，DCE 必须能够**分别**恢复它们」这句话，
+    只有在预埋项两两无歧义时才有定义 —— 而那需要「四类各占专用视图」的构造。
+    真实交叠下四类会碰撞，「分别恢复」不是一个良定义的量。
+
+    所以召回必须分三档报：strict / accounted / 真漏。
+    只报 strict，会把「按定义该算另一类」和「算法漏了」算成同一个 0。
+    """
+    from checks import corpus
+    r = corpus.scan(limit=120)
+    for t, d in r["recalls"].items():
+        assert d["unexplained"] == 0, f"{t} 有 {d['unexplained']} 条真漏"
+    # 至少有一类在交叠下 strict 掉了 —— 否则这个测试是空转的
+    dropped = [t for t, d in r["recalls"].items()
+               if d["n"] and d["min_strict"] is not None and d["min_strict"] < 1.0]
+    assert dropped, "没有任何一类的 strict 召回掉落 —— 交叠没被真正测到，检查是空转的"
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation

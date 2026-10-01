@@ -93,34 +93,42 @@ def _labels(nodes: list, region: int = 3) -> dict:
     return out
 
 
-def base_graph(n_nodes: int = 12, n_edges: int = 14, seed: int = 20261001) -> dict:
-    """无向骨架 + 有向类型的边。确定性。"""
-    nodes = [_nid(i) for i in range(n_nodes)]
-    st = seed
-    seen = set()
-    edges = []
-    guard = 0
-    while len(edges) < n_edges and guard < 10000:
-        guard += 1
-        st = _xs(st)
-        i = st % n_nodes
-        st = _xs(st)
-        j = st % n_nodes
-        if i == j:
-            continue
-        a, b = nodes[i], nodes[j]
-        if a > b:
-            a, b = b, a
-        if (a, b) in seen:
-            continue
-        seen.add((a, b))
-        # ⚠️ 种类**确定性轮转**，不是随机取。
-        # 随机取会造出一个「小 core 里一条 supports 都没有」的图，于是
-        # 「种 2 条矛盾」这个要求在图上根本无法满足 —— 而那会被误读成 DCE 漏报。
-        # 轮转保证种类均匀，去掉这一整类不稳定。
-        edges.append((a, b, KINDS[len(edges) % len(KINDS)]))
-    edges.sort()
-    return {"nodes": nodes, "edges": edges, "labels": _labels(nodes)}
+def _spread(edges: list, n: int) -> list:
+    """从边表里**均匀取样** n 条，而不是取前 n 条。
+
+    ⚠️ 为什么必须这样：边表是排序过的（按 `(from, to)`），所以 `edges[:n]`
+    会把语料永久锁在字典序最靠前的一小撮节点上。上一轮量出来的证据：
+    40 个节点的骨架、90 条边，`n_core=12` 只用到 14 个节点，
+    而同样 12 条边随机取会用到平均 18.5 个 —— **参数放大了，材料没有变。**
+
+    均匀取样是确定性的、无参数的，且把 core 铺到整个 id 空间与所有连通分量上。
+    """
+    if n <= 0:
+        return []
+    if n >= len(edges):
+        return list(edges)
+    step = len(edges) / n
+    out, used = [], set()
+    for i in range(n):
+        idx = int(i * step)
+        while idx in used and idx + 1 < len(edges):
+            idx += 1
+        used.add(idx)
+        out.append(edges[idx])
+    return out
+
+
+def base_graph(n_nodes: int = 12, n_edges: int = 14, seed: int = 20261001,
+               topology: str = "random", n_components: int = 1) -> dict:
+    """骨架。**形状交给 `generators/topology.py`，本函数只是它的门面。**
+
+    ⚠️ 上一轮这里是内联的连通随机图，而那让语料库只会造一种长相 ——
+    最直接的后果是 §十一 的焦点机制全程空转（连通图上焦点恒等于 1）。
+    形状参数与视图构造是两件事，所以在模块层面分开了。
+    """
+    from . import topology as T
+    return T.make_skeleton(n_nodes=n_nodes, n_edges=n_edges, seed=seed,
+                           topology=topology, n_components=n_components)
 
 
 def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
@@ -135,6 +143,15 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
         refinements    植入的精炼对数
         alternatives   植入的竞争解释数
         private        每个视图的私有边数（默认 1，见模块 docstring）
+
+    形状旋钮（上一轮完全没有，见模块 docstring 里的覆盖率数字）：
+
+        empty_views     有几个视图**什么都没有**（单元集 = ∅）
+        node_only_views 有几个视图**只有节点、没有边**
+        disjoint_views  有几个视图用**与 core 不相交**的另一批节点
+        equal_views     强制几个视图**逐字节相同**
+        allow_overlap   允许四类共用视图（默认 True）。False 时退回上一轮的
+                        「四类各需专用视图」，放不下就报错
     """
     n_views = int(spec.get("n_views", 3))
     if n_views < 2:
@@ -145,13 +162,39 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
     n_omit = int(spec.get("omissions", 0))
     n_refine = int(spec.get("refinements", 0))
     n_alt = int(spec.get("alternatives", 0))
+    n_empty = int(spec.get("empty_views", 0))
+    n_nodeonly = int(spec.get("node_only_views", 0))
+    n_disjoint = int(spec.get("disjoint_views", 0))
+    n_equal = int(spec.get("equal_views", 0))
+    allow_overlap = bool(spec.get("allow_overlap", True))
 
     nodes, edges = base["nodes"], list(base["edges"])
     if n_core > len(edges):
         raise ValueError(f"n_core={n_core} 超过边数 {len(edges)}")
 
-    core = edges[:n_core]
-    rest = edges[n_core:]
+    # ⚠️ core 必须**铺开取**，不能取 `edges[:n_core]`。
+    # 边表排过序（按 from,to），于是前 n 条全部挤在字典序最靠前的那一小撮 id 上 ——
+    # 上一轮量出来「前 12 条边里有 7 条起点都是 arg-0001」。
+    # 后果是无论把基础图造多大，语料库用到的节点永远是同一小撮：
+    # **参数放大了，材料没有变。**
+    core = _spread(edges, n_core)
+
+    # ⚠️ 再保证 core 里有**足够多可互斥的边**。
+    # 种类是轮转分配的，可互斥的只占三分之一，于是小 core 上「种 2 条矛盾」
+    # 这个要求在图上根本无法满足 —— 而上一轮的表现是**直接报错、拒掉 62% 的配置**。
+    # 那是把生成器的取法问题提给了调用方：要求是合理的，取法该由生成器负责。
+    # 这里把 core 里非互斥的边换成 rest 里互斥的，长度不变。
+    if n_contra > 0:
+        _pool = [e for e in edges if e[2] in _CONTRADICTABLE]
+        _have = [e for e in core if e[2] in _CONTRADICTABLE]
+        _need = n_contra - len(_have)
+        if _need > 0:
+            _spare = [e for e in _pool if e not in set(core)]
+            _swap = [e for e in core if e[2] not in _CONTRADICTABLE]
+            for i in range(min(_need, len(_spare), len(_swap))):
+                core[core.index(_swap[i])] = _spare[i]
+
+    rest = [e for e in edges if e not in set(core)]
     vids = [f"V{i + 1}" for i in range(n_views)]
 
     # 每个视图 = core + 自己的私有边（私有边优先从 rest 取，不够就现场造）
@@ -215,10 +258,16 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
     # ⚠️ 第二版只重排了顺序，还是不行：从精炼的**细**侧删边同样会破坏 `粗 ⊂ 细`，
     # 而精炼取并集之后两个视图的后继集合会变得可比，竞争解释就没了。
     #
-    # 所以结论是一条硬约束：**四类同时植入需要各自专用的视图。**
-    # 这不是偷懒 —— 一个视图既参与精炼又被删边，那本来就是在造一个
-    # 「分类该算哪一类都对」的样本，而 §十五 Test 3 要的是「**分别**恢复它们」。
-    # 视图不够时本函数**直接报错**，不悄悄种出一个不可能通过的测试床。
+    # ⚠️ 第三版（上一轮）的修法是「四类各需专用视图，不够就报错」。
+    # 它确实让 Test 3 全绿了 —— 但量出来的代价是：**144 个配置只有 54 个建得出来
+    # （38% 可达）**，而且 54/54 都是「四类视图完全不重叠」的干净情形。
+    # 真实视图不会体贴地各占一个视图，所以那套语料**测不到交叠**，
+    # 也就测不到我上一轮自己发现的「同一单元两个主语」那个歧义。
+    #
+    # 所以现在改成：**优先专用，放不下就共用**（`allow_overlap`，默认开）。
+    # 共用会带来「分类本来就该是别的类型」的样本 —— 那不是要消灭的噪声，
+    # 那是**要测的东西**。它的处置在 `_classify_plantings()`：
+    # 记下每个预埋项**按定义**该算哪一类，而不是一律当成漏报。
     ref_plan = []
     used_by_ref = set()
     for k in range(n_refine):
@@ -233,14 +282,16 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
     reserved = {v for p in ref_plan for v in p}
     free = [v for v in vids if v not in reserved]
     need = (2 if n_alt else 0) + (1 if n_contra else 0) + (1 if n_omit else 0)
-    if len(free) < need:
+    if len(free) < need and not allow_overlap:
         raise ValueError(
-            f"四类各需专用视图：精炼占用 {len(reserved)} 个，剩下 {len(free)} 个可用，"
-            f"但还需要 {need} 个（竞争解释 2、矛盾 1、缺失 1）。"
-            f"请把 n_views 提到至少 {len(reserved) + need}，或减少植入量。\n"
-            "**这不是实现限制，是测试床的要求**：一个视图既参与精炼又被删边，"
-            "就是在造「分类该算哪一类都对」的样本，而 Test 3 要的是分别恢复。"
+            f"allow_overlap=False 时四类各需专用视图：精炼占用 {len(reserved)} 个，"
+            f"剩下 {len(free)} 个可用，但还需要 {need} 个。"
+            f"请把 n_views 提到至少 {len(reserved) + need}，或减少植入量。"
         )
+    if len(free) < need:
+        # 共用模式：拿全部视图当候选池。交叠会造出「按定义该算另一类」的样本，
+        # 由 `_classify_plantings()` 逐条判定，不当成漏报。
+        free = list(vids)
     cursor = 0
 
     # ① 竞争解释：专用 2 个视图，后继集合互不包含
@@ -281,25 +332,65 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
         for e in extra:
             truth["refinement"].add((coarse, fine, "edge", e))
 
-    # ③ 矛盾：专用视图，翻转关系
+    # ③ 矛盾：翻转关系
     if n_contra:
-        cview = free[cursor]
+        # ⚠️ `% len(free)`：共用模式下 free = 全部视图，而 need 可能超过视图数
+        # （例如 2 个视图要种 4 类）。不回绕就 IndexError —— 而那个错会穿到
+        # 调用方，看起来像「生成器坏了」，其实是共用模式的正常情形。
+        cview = free[cursor % len(free)]
         cursor += 1
         for (a, b, r) in contra_slice:
             raw[cview] = [e for e in raw[cview] if not (e[0] == a and e[1] == b)]
             raw[cview].append((a, b, "contradicts"))
             truth["contradiction"].add((a, b, r, "contradicts"))
 
-    # ④ 缺失：专用视图，删边（最后做，删了就不该再有人加回来）
+    # ④ 缺失：删边（最后做，删了就不该再有人加回来）
     dropped = []
     if n_omit:
-        oview = free[cursor]
+        oview = free[cursor % len(free)]
         cursor += 1
         for e in omit_slice:
             if e in raw[oview]:
                 raw[oview] = [x for x in raw[oview] if x != e]
                 dropped.append((oview, e))
                 truth["omission"].add((oview, "edge", e))
+
+    # ⑤ 形状旋钮：让语料能表达**上一轮表达不了的长相**。
+    #
+    # ⚠️ 上一轮量出来的覆盖率：空视图 0%、只有节点没有边的视图 0%、
+    # 节点集完全不相交 2%、视图完全相等 0%、含孤立节点 0%。
+    # 也就是说语料库只会造一种长相，而 DCE 在别的长相上会不会崩，
+    # **一次都没测过**。这四类形状不是装饰，是能在实现里找出真 bug 的输入
+    # （比如 `refinement_pairs` 曾把空视图当成「较粗」的一侧，
+    # 而空视图正是这里造出来的）。
+    #
+    # 这些视图**不参与四类植入**（植入已经做完了），所以加进来不会污染 truth；
+    # 它们带来的缺失会被 `_classify_plantings()` 当作「定义使然的额外检出」。
+    shape_views = []
+    shape_truth = {"empty": [], "node_only": [], "disjoint": [], "equal": []}
+    used_nodes = {x for e in core for x in (e[0], e[1])}
+    spare = [n for n in nodes if n not in used_nodes]
+    for i in range(n_empty):
+        shape_views.append(("E%d" % (i + 1), [], []))
+        shape_truth["empty"].append("E%d" % (i + 1))
+    for i in range(n_nodeonly):
+        ns = sorted(used_nodes)[i::max(1, n_nodeonly)][:3] or sorted(used_nodes)[:1]
+        shape_views.append(("N%d" % (i + 1), ns, []))
+        shape_truth["node_only"].append("N%d" % (i + 1))
+    for i in range(n_disjoint):
+        chunk = spare[i::max(1, n_disjoint)][:4]
+        if len(chunk) < 2:
+            continue
+        es = [(chunk[j], chunk[j + 1], "related_to") for j in range(len(chunk) - 1)]
+        shape_views.append(("D%d" % (i + 1), sorted(chunk), es))
+        shape_truth["disjoint"].append("D%d" % (i + 1))
+    for i in range(n_equal):
+        # 与 V1 逐字节相同 —— Test 1（Identity）的单点版本，嵌在别的配置里
+        base_es = sorted(set(raw[vids[0]]))
+        shape_views.append(("Q%d" % (i + 1),
+                            sorted({x for e in base_es for x in (e[0], e[1])}),
+                            base_es))
+        shape_truth["equal"].append("Q%d" % (i + 1))
 
     views = []
     for vi in vids:
@@ -314,6 +405,12 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
             # 而 metadata 正是白名单里留给这类附加物的位置。
             metadata={"labels": {n: base["labels"][n] for n in ns}},
         ))
+    for vid, ns, es in shape_views:
+        views.append(V.make_view(
+            view_id=vid, source_ref=f"synthetic://{vid}",
+            source_kind="experiment", nodes=ns, edges=es,
+            metadata={"labels": {n: base["labels"].get(n, n) for n in ns}},
+        ))
 
     # 共识的 ground truth = **定义**（全部视图的交集），不是「我以为共享的那些」
     from analysis import consensus as C
@@ -322,23 +419,130 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
     truth["n_views"] = n_views
     truth["core"] = set(core)
     truth["dropped"] = dropped
+    truth["shapes"] = shape_truth
+    truth["n_units"] = sum(len(C.units_of(v)) for v in views)
 
-    # ── 存活校验：种下去的结构必须活到视图构造结束 ──────────────────────
+    # ── 存活校验 / 交叠分类 ─────────────────────────────────────────────
     #
-    # ⚠️ 这条是踩出来的。第一版四类依次植入，而**精炼那一步取的是并集** ——
+    # ⚠️ 存活校验是踩出来的。上一轮四类依次植入，而**精炼那一步取的是并集** ——
     # 它把先前种下的矛盾翻转和缺失**又加回去了**。结果是：truth 里有 20 条缺失、
     # 10 条矛盾，而视图里一条都不剩，于是召回全是 0，看起来像 DCE 完全失效，
     # 其实是生成器自己把自己种的东西抹掉了。
+    # **静默地种失败，在报告上长得和「算法漏报」一模一样。**
     #
-    # 所以这里逐条核对，不活下来就当场报错 —— **静默地种失败，
-    # 在报告上长得和「算法漏报」一模一样。**
-    bad = _survival_problems(views, truth)
-    if bad:
+    # ⚠️ 但上一轮的处置过头了：它**直接报错**，于是配置空间的 62% 被拒，
+    # 而且剩下的 54/54 全是「四类各占专用视图」的干净情形。
+    # 现在分两档：
+    #
+    #   allow_overlap=False  交叠一律当错误（上一轮的行为，保留作对照）
+    #   allow_overlap=True   交叠**不报错**，而是逐条判定「按定义它该算哪一类」，
+    #                        分不清的才报错。交叠本身是要测的东西，不是噪声。
+    problems = _survival_problems(views, truth)
+    truth["reclassified"] = []
+    if allow_overlap:
+        truth["reclassified"], hard = _classify_plantings(views, truth)
+        # 硬错误只剩「预埋项在最终视图里根本不存在」那一类 ——
+        # 那说明生成器没种上，与分类无关。
+        problems = hard
+    if problems:
         raise ValueError(
-            "植入的结构没能活到视图构造结束：\n  - " + "\n  - ".join(bad[:8])
-            + f"\n（共 {len(bad)} 条）。这是生成器的问题，不是 DCE 的问题。"
+            "植入的结构没能活到视图构造结束：\n  - " + "\n  - ".join(problems[:8])
+            + f"\n（共 {len(problems)} 条）。这是生成器的问题，不是 DCE 的问题。"
         )
     return views, truth
+
+
+def _classify_plantings(views, truth) -> tuple:
+    """把「预埋了 A 却按定义该算 B」逐条分出来。返回 `(reclassified, hard)`。
+
+    ⚠️ 为什么需要它：交叠植入必然造出**分类本来就该是另一类**的样本。
+    比如某个视图既是精炼的粗侧、又被删了一条边 —— 那条缺失按定义会被
+    refinement 认领（`refinement_covered`），所以它**正确地**不该报成 omission。
+
+    这不是要消灭的噪声，是**要测的东西**：它正是「同一单元、两个主语」那个歧义的
+    具体形态。把它一律记成漏报，恢复率就会因为定义问题而不是错误变差 ——
+    上一轮我用「precision 走定义校验」绕过了这一点，但那是**绕过**，不是测。
+
+    这里把每条预埋项的**应有类型**独立算出来（用的是与 DCE 不同的代码路径：
+    直接调定义判据，不跑 `divergence.analyse`），于是：
+      - 应有的类型 == 预埋的类型   → 正常，DCE 该报出来
+      - 应有的类型 != 预埋的类型   → reclassified，记下原因
+      - 预埋的单元在视图里不存在    → hard（生成器没种上）
+    """
+    from analysis import consensus as C
+    from analysis import divergence as D
+    by_id = {v["id"]: v for v in views}
+    unit_of = {v["id"]: C.units_of(v) for v in views}
+    ref_covered = {v["id"]: D.refinement_covered(v, views) for v in views}
+    reclassified, hard = [], []
+
+    for (vi, kind, key) in truth["omission"]:
+        if vi not in unit_of:
+            hard.append(f"缺失：视图 {vi} 不存在")
+            continue
+        u = (kind, key)
+        if u in unit_of[vi]:
+            hard.append(f"缺失：{vi} 仍然有 {key}")
+            continue
+        if u in ref_covered[vi]:
+            reclassified.append({
+                "planted": "omission", "subject": (vi, kind, str(key)),
+                "actually": "refinement",
+                "why": f"{vi} 是某个精炼对的粗侧，这条缺失被 refinement 认领",
+            })
+        elif kind == "edge" and D._has_exclusive_counterpart(
+                by_id[vi], key[0], key[1], key[2]):
+            reclassified.append({
+                "planted": "omission", "subject": (vi, kind, str(key)),
+                "actually": "contradiction",
+                "why": f"{vi} 在同一对端点上说了互斥的话",
+            })
+
+    for (a, b, r1, r2) in truth["contradiction"]:
+        holders = {r: [vid for vid, us in unit_of.items() if ("edge", (a, b, r)) in us]
+                   for r in (r1, r2)}
+        if not holders[r1] or not holders[r2]:
+            hard.append(f"矛盾：{a}->{b} 的 {r1}/{r2} 有一边一个视图都没有")
+        elif set(holders[r1]) & set(holders[r2]):
+            reclassified.append({
+                "planted": "contradiction", "subject": (a, b, r1, r2),
+                "actually": "同视图内部不一致",
+                "why": f"两种关系同时出现在 {sorted(set(holders[r1]) & set(holders[r2]))} "
+                       "里 —— 同视图内部的不一致不算跨视图分歧",
+            })
+
+    for (coarse, fine, kind, key) in truth["refinement"]:
+        if coarse not in unit_of or fine not in unit_of:
+            hard.append(f"精炼：视图 {coarse}/{fine} 不存在")
+            continue
+        if not (unit_of[coarse] < unit_of[fine]):
+            reclassified.append({
+                "planted": "refinement", "subject": (coarse, fine, kind, str(key)),
+                "actually": "无（不再是精炼对）",
+                "why": f"{coarse} ⊂ {fine} 不成立 —— 交叠植入把子集关系破坏了",
+            })
+        elif (kind, key) not in (unit_of[fine] - unit_of[coarse]):
+            reclassified.append({
+                "planted": "refinement", "subject": (coarse, fine, kind, str(key)),
+                "actually": "无（单元不在差集里）",
+                "why": f"{key} 不在 {fine} 比 {coarse} 多出来的部分里",
+            })
+
+    for item in truth["alternative"]:
+        src, rel, t1, t2, va, vb = item
+        def succ(vid):
+            return {e["to"] for e in by_id[vid]["edges"]
+                    if e["from"] == src and e["relation"] == rel}
+        sa, sb = succ(va), succ(vb)
+        if not sa or not sb:
+            hard.append(f"竞争解释：{src}--{rel} 有一边没有后继（{va}/{vb}）")
+        elif sa <= sb or sb <= sa:
+            reclassified.append({
+                "planted": "alternative", "subject": (src, rel, str(t1), str(t2)),
+                "actually": "refinement/omission",
+                "why": f"{va}/{vb} 的后继集合有包含关系",
+            })
+    return reclassified, hard
 
 
 def _survival_problems(views, truth) -> list:

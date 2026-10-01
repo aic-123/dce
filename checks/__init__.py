@@ -17,10 +17,11 @@ from __future__ import annotations
 
 import sys
 
-# 四组测试。后两组是「度量」性质的，走 report()，不进退出码。
+# 四组测试。后三组是「度量」性质的，走 report()，不进退出码。
 # `scope` 是 §二十 排除项的可执行形式，也是断言。
+# `corpus` 是**反例扫描**：把每条结论拿到一整片配置上撞一遍。
 ASSERT_GROUPS = ("identity", "interference", "scope")
-MEASURE_GROUPS = ("reconstruction", "ablation")
+MEASURE_GROUPS = ("reconstruction", "ablation", "corpus")
 
 
 def _load(name):
