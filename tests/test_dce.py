@@ -632,6 +632,87 @@ def test_positions_are_labelled_as_authored():
             assert n in POS.VOCAB, f"{n} 不在词汇表里"
 
 
+def test_radius_calibration_assertions_pass():
+    """半径：显式参数，上界由结构算出。§T0.3 禁的是**断言一个具体阈值**，
+    不是禁「有一个显式参数」—— 区别在值由谁定。"""
+    from checks import radius
+    for title, ok, detail in radius.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_radius_zero_is_backward_compatible():
+    """`radius=0` 必须与旧签名结果一致 —— 加参数不许改变既有行为。"""
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _ = POS.build()
+    d = D.analyse(views)
+    assert len(F.foci(d)) == len(F.foci(d, radius=0, views=views))
+
+
+def test_radius_requires_structure_graph():
+    """`radius>0` 必须给结构图。不给就报错 —— 因为**猜一个距离**
+    正是 §T0.3 要防的。"""
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _ = POS.build()
+    d = D.analyse(views)
+    try:
+        F.foci(d, radius=2)
+    except ValueError as e:
+        assert "结构图" in str(e)
+        return
+    raise AssertionError("radius>0 不传 views 竟然没报错")
+
+
+def test_radius_semantics_is_exact_distance():
+    """**距离语义必须是精确的**：并簇当且仅当锚点集距离 ≤ radius。
+
+    ⚠️ 这条是抓 bug 的。第一版算的是「两边的半径球相交」，而两个半径 k 的球
+    相交等价于 `dist ≤ 2k` —— **生效阈值是半径的两倍**。它不报错，
+    只让曲线在比预期早一半的地方塌下去。
+
+    构造：10 节点链，两簇分歧的锚点最近距离正好 5。
+    于是 `r*` 必须是 **5**（不是 2 或 3）。
+    """
+    from core import view as V
+    from analysis import divergence as D
+    from analysis import focus as F
+
+    nodes = [f"con-{i:04d}" for i in range(1, 11)]
+    chain = [(nodes[i], nodes[i + 1], "contains") for i in range(len(nodes) - 1)]
+
+    def mv(vid, edges):
+        return V.make_view(view_id=vid, source_ref=f"authored://r/{vid}",
+                           source_kind="experiment", nodes=nodes, edges=edges)
+
+    whole = mv("L", chain)
+    a = mv("A", [e for e in chain if e not in chain[:2]])
+    b = mv("B", [e for e in chain if e not in chain[-2:]])
+    d = D.analyse([whole, a, b])
+
+    # 两簇锚点：{1,2,3} 与 {8,9,10}，最近距离 3→8 = 5
+    assert len(F.foci(d, radius=0, views=[whole, a, b])) == 2, "radius=0 该给 2 个焦点"
+    assert len(F.foci(d, radius=4, views=[whole, a, b])) == 2, "radius=4 还不该并上"
+    assert len(F.foci(d, radius=5, views=[whole, a, b])) == 1, "radius=5 必须并上"
+    cal = F.calibrate(d, [whole, a, b])
+    assert cal["r_star"] == 5, f"r* 应为精确距离 5，实测 {cal['r_star']}（语义差一倍？）"
+    assert cal["usable_max"] == 4
+
+
+def test_calibrate_reports_the_whole_curve():
+    """校准必须报**整条曲线**与理由，不能只给一个数 —— 只给一个数就回到了「拍阈值」。"""
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _ = POS.build()
+    cal = F.calibrate(D.analyse(views), views)
+    assert cal["curve"], "曲线不能为空"
+    assert set(cal) >= {"curve", "r_star", "usable_max", "suggested", "note"}
+    assert cal["note"], "必须给理由"
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation

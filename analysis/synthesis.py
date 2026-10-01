@@ -34,13 +34,18 @@ from . import divergence as D
 from . import focus as F
 
 
-def build(views) -> dict:
-    """从一组视图算出合成结构。**只读入参。**"""
+def build(views, radius: int = 0) -> dict:
+    """从一组视图算出合成结构。**只读入参。**
+
+    `radius` 是焦点聚类的结构距离上界。**默认 0（共享节点），不改变既有结果。**
+    ⚠️ 半径的值**不由本函数决定** —— `focus.calibrate()` 从结构里算出可用区间，
+    调用方若要换值，应当先看那条曲线。见 `analysis/focus.py` 的模块 docstring。
+    """
     V.check_distinct(views)
 
     cons = C.consensus(views)
     div = D.analyse(views)
-    fx = F.foci(div)
+    fx = F.foci(div, radius=radius, views=views)
 
     # 把焦点号附加到每条分歧记录上（新字典，不改原记录）
     focus_of = {}
@@ -78,6 +83,8 @@ def build(views) -> dict:
             ],
             "generated_by": "dce.analysis.synthesis",
             "n_views": len(views),
+            # 半径是**显式记录**的：换了值，产物就应当看得出换了值
+            "focus_radius": radius,
         },
     }
 
