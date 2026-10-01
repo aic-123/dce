@@ -426,6 +426,124 @@ def test_spec_only_kinds_are_never_used_at_the_frontier():
         "占位种类必须是**本层声明的**，不能借用上游的某个词"
 
 
+def test_frontmatter_parser_handles_real_shape():
+    """极简 frontmatter 解析器要能吃下真实节点的四种 YAML 形状。
+
+    ⚠️ 这条**不需要语料库**，所以它永远会跑 —— 语料不在时，
+    「解析器对真实形状有效」这件事仍然可测。
+    """
+    from adapters import scaffold as SC
+    text = (
+        "---\n"
+        'id: "arg-0001"\n'
+        "type: 论据\n"
+        'title: "增量消融"\n'
+        'aliases: ["ablation", "消融链"]\n'
+        "cues:\n"
+        '  - "第一句"\n'
+        '  - "第二句"\n'
+        'scope: "适用范围"\n'
+        "source:\n"
+        '  ref: "arXiv:2503.14476（DAPO）§4"\n'
+        "  kind: 论文\n"
+        "evidence_status: 未验证\n"
+        'relations: ["stance-0001"]\n'
+        "filled_by: 模型(DeepSeek-V4.1-Flash)\n"
+        'notes: "备注"\n'
+        "---\n正文\n"
+    )
+    fm = SC.parse_frontmatter(text)
+    assert fm["id"] == "arg-0001"
+    assert fm["type"] == "论据"
+    assert fm["aliases"] == ["ablation", "消融链"]
+    assert fm["cues"] == ["第一句", "第二句"], fm["cues"]
+    assert fm["source"] == {"ref": "arXiv:2503.14476（DAPO）§4", "kind": "论文"}
+    assert fm["relations"] == ["stance-0001"]
+    assert SC.parse_frontmatter("没有 frontmatter") == {}
+
+
+def test_scaffold_source_kind_is_a_different_axis():
+    """**同名不同义**：Scaffold 的 `source.kind`（节点级体裁，中文）
+    与 DCE 的 `source.kind`（视图级产出者，英文）不是一个轴。
+
+    硬做一张翻译表会把「体裁」伪装成「产出者」，所以 adapter 只把它当**切分键**。
+    """
+    from adapters import scaffold as SC
+    from core import view as V
+    a = SC.to_view("SC", [{"id": "con-0001", "relations": [],
+                           "source": {"ref": "x", "kind": "论文"}}])
+    assert a.view["source"]["kind"] == "scaffold", \
+        "视频的 source.kind 必须是产出者语义，不是节点的体裁"
+    assert a.view["source"]["kind"] in V.SOURCE_KINDS
+    joined = " ".join(a.declares)
+    assert "同名不同义" in joined or "不是一个轴" in joined or "不做翻译" in joined, \
+        "同名不同义这件事必须被显式声明出来"
+
+
+def test_split_views_by_source_kind():
+    """按体裁切视图。切分键只用于**切分**，不进任何字段。"""
+    from adapters import scaffold as SC
+    nodes = [{"id": "con-0001", "relations": [], "source": {"kind": "论文"}},
+             {"id": "con-0002", "relations": ["con-0001"],
+              "source": {"kind": "教材"}},
+             {"id": "arg-0001", "relations": [], "source": {"kind": "教材"}}]
+    adaps = SC.split_views(nodes, split_by="source.kind")
+    assert len(adaps) == 2, f"该切出 2 个视图，实测 {len(adaps)}"
+    sizes = {a.view["id"]: len(a.view["nodes"]) for a in adaps}
+    assert sum(sizes.values()) == 3, f"节点不该在切分中丢失：{sizes}"
+    from core import view as V
+    V.check_distinct([a.view for a in adaps])
+
+
+def test_realdata_skip_state_is_explicit():
+    """语料不在时返回的必须是**显式的跳过**，而不是静默通过。
+
+    ⚠️ 这条钉的是「跳过不等于通过」。一个「语料不在就算过」的检查，
+    与一条永远通过的检查，在输出上长得一样。
+
+    语料在本机会存在，所以要**强制**制造缺席 —— 用环境变量指向一个不存在的路径，
+    而不是假设它不在（第一版就是那么假设的，于是在有语料时红得没有意义）。
+    """
+    import os
+    from checks import realdata as RD
+
+    r = RD.run_real(directory="C:/__这个目录不存在__")
+    assert r.get("skipped") is True, f"不存在的目录竟然没被标成跳过：{r}"
+    assert "why" in r, "跳过必须带理由"
+
+    old = os.environ.get("DCE_SCAFFOLD_CORPUS")
+    os.environ["DCE_SCAFFOLD_CORPUS"] = "C:/__这个目录不存在__"
+    try:
+        outs = RD.run_all()
+    finally:
+        if old is None:
+            os.environ.pop("DCE_SCAFFOLD_CORPUS", None)
+        else:
+            os.environ["DCE_SCAFFOLD_CORPUS"] = old
+    assert outs, "run_all 不该返回空"
+    assert outs[0][1] is None, \
+        "跳过态必须用 None 表示（True/False 都会混进「过」或「红」的计数）"
+
+
+def test_realdata_on_the_real_corpus():
+    """有真实语料就真跑；没有就跳过（并显式说明）。"""
+    from checks import realdata as RD
+    r = RD.run_real()
+    if r.get("skipped"):
+        print(f"    [跳过] {r['why']} —— 跳过不等于通过")
+        return
+    assert r["nodes"] > 0 and r["dangling"] == 0
+    assert r["views"] >= 2, f"切不出多视图：{r['view_sizes']}"
+    # 这份语料是一个知识库的**切面**，不是多份立场 —— 交集为 0
+    assert r["intersection"] == 0
+    assert r["consensus"] == 0
+    # 无种类的关系 → 一条矛盾都不可能有
+    assert r["types"].get("contradiction", 0) == 0
+    # 真实规模下 flat 口径不可用：合成比输入大
+    assert r["compression"]["flat"] < 1.0
+    assert r["compression"]["focused"] > 1.0, "焦点概括该把它收回来"
+
+
 def test_arena_disagreement_gap_is_measured_not_hidden():
     """**接口错位**：Arena 的两方对立形状在 DCE 的矛盾判据下报不出来。
 

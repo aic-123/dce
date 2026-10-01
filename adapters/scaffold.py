@@ -42,6 +42,8 @@ Evidence Status`。逐条核对真实仓库（`SPEC.md` / `schema/node.schema.ya
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from core import edge as E
 from core import node as N
 from core import view as V
@@ -126,6 +128,10 @@ def to_view(view_id: str, nodes: list, *, source_ref: str = "scaffold://unknown"
             "方向照抄 Scaffold 的 relations 引用，**不声称它是语义方向**"
             "（Scaffold 自己的方向约定明文不校验）",
             "节点 id 的形状与前缀映射照抄 Scaffold（`schema/node.schema.yaml`）",
+            # ⚠️ 这条声明属于**翻译本身**，不只属于切分 —— 所以放在这里，
+            # 而不是只放在 `split_views` 里。（测试抓到过：只放后者时，
+            # 直接用 `to_view` 的人看不到这条。）
+            SOURCE_KIND_NOTE,
         ],
         # 没有互斥的种类 → 不可能有矛盾。这是形状的事实，不是实现限制。
         # ⚠️ 这里**不写死**，由实际吐出的种类推出来 —— 见 `derived_can_produce`。
@@ -136,14 +142,8 @@ def to_view(view_id: str, nodes: list, *, source_ref: str = "scaffold://unknown"
 
 
 def from_corpus_files(paths, view_id: str = "SC") -> Adaptation:
-    """从 Scaffold 形状的 JSON 文件读一批节点。**只读，不写。**
-
-    这是给 rl-scaffold 那类「Scaffold 的一次实际应用」用的入口：
-    它有一批真节点（36 节点 / 112 处境句）。读取是安全的，
-    因为这个 adapter **从不回写**（`§C7.1 ④` 单向性）。
-    """
+    """从 Scaffold 形状的 JSON 文件读一批节点。**只读，不写。**"""
     import json
-    from pathlib import Path
     nodes, refs = [], []
     for p in paths:
         p = Path(p)
@@ -158,3 +158,156 @@ def from_corpus_files(paths, view_id: str = "SC") -> Adaptation:
                 source_kind="scaffold")
     a.declares.append(f"来源文件 {len(refs)} 个")
     return a
+
+
+# ── 真实语料：Scaffold 的节点是带 YAML frontmatter 的 Markdown ─────────
+def parse_frontmatter(text: str) -> dict:
+    """极简 YAML 子集解析器。**不引第三方**（§十七 纯标准库）。
+
+    只处理这份语料里实际出现的形状（已拿 rl-scaffold 的 36 个真节点验过，
+    36/36 解析成功、11 字段全齐）：
+
+        key: "value"          带引号标量
+        key: 值               裸标量
+        key: ["a", "b"]       行内列表
+        key:                  列表，下面若干 `  - "x"`
+        key:                  嵌套映射，下面若干 `  k: v`（一层）
+
+    ⚠️ 它**不是**一个 YAML 实现，也不打算是。多行块标量（`|` / `>`）不支持 ——
+    真出现时会解析成 `None`，而 `to_view` 会把它当缺字段记账，不会静默吞掉。
+    """
+    import re
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
+        return {}
+    body = lines[1:end]
+
+    def unq(s: str) -> str:
+        s = s.strip()
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+            return s[1:-1]
+        return s
+
+    out, i = {}, 0
+    while i < len(body):
+        line = body[i]
+        if not line.strip() or line.lstrip().startswith("#"):
+            i += 1
+            continue
+        m = re.match(r"^([A-Za-z_][\w-]*):\s*(.*)$", line)
+        if not m:
+            i += 1
+            continue
+        key, rest = m.group(1), m.group(2).strip()
+        if rest:
+            if rest.startswith("[") and rest.endswith("]"):
+                inner = rest[1:-1].strip()
+                out[key] = ([unq(x) for x in inner.split(",") if x.strip()]
+                            if inner else [])
+            else:
+                out[key] = unq(rest)
+            i += 1
+            continue
+        block = []
+        j = i + 1
+        while j < len(body) and (not body[j].strip() or body[j].startswith("  ")):
+            if body[j].strip():
+                block.append(body[j])
+            j += 1
+        if not block:
+            out[key] = None
+        elif all(b.lstrip().startswith("- ") for b in block):
+            out[key] = [unq(b.lstrip()[2:]) for b in block]
+        else:
+            sub = {}
+            for b in block:
+                mm = re.match(r"^\s+([A-Za-z_][\w-]*):\s*(.*)$", b)
+                if mm:
+                    sub[mm.group(1)] = unq(mm.group(2))
+            out[key] = sub
+        i = j
+    return out
+
+
+def load_corpus_dir(directory) -> list:
+    """读一个 Scaffold 语料目录（`nodes/*.md`）。返回节点 dict 列表。"""
+    d = Path(directory)
+    files = sorted(d.glob("*.md")) if d.is_dir() else [d]
+    nodes = []
+    for p in files:
+        fm = parse_frontmatter(p.read_text(encoding="utf-8"))
+        if fm.get("id"):
+            nodes.append(fm)
+    return nodes
+
+
+# ⚠️ 两处只有真实数据才会暴露的错位，都记在这里，不藏在代码里。
+#
+# 一、`source.kind` **同名不同义**。
+#     Scaffold 的是**节点级**的「这条证据出自什么体裁」（论文 / 教材 / 官方文档 / 其他，中文），
+#     DCE 的是**视图级**的「这个视图由谁产生」（model / human / paper / …，英文）。
+#     两者的取值域**交集为空**，但那不代表要写一张翻译表 —— 它们不是一个轴。
+#     硬翻译会把「体裁」伪装成「作者」。
+#     处置：视图的 `source_kind` 一律是 `"scaffold"`（视图来自一份 Scaffold 语料），
+#     而节点的 `source.kind` **只用作切分键**，不进任何字段。
+#
+# 二、`type` 是中文（论据 / 判断点 / …），而 DCE 的节点 id 前缀是英文。
+#     实测 36/36 节点的 `type` 与 `id` 前缀**完全一致**，所以前缀可以信，
+#     中文 type 丢掉。若哪天两者不一致，前缀仍然是权威（id 是主键）。
+SOURCE_KIND_NOTE = (
+    "⚠️ Scaffold 的 `source.kind`（论文/教材/官方文档/其他）与 DCE 的 "
+    "`source.kind`（model/human/paper/…）**同名不同义**：前者是节点级的证据体裁，"
+    "后者是视图级的产出者。取值域交集为空，但**不做翻译** —— "
+    "硬翻译会把体裁伪装成产出者。本 adapter 只用它当**切分键**。"
+)
+
+
+def split_views(nodes: list, *, split_by: str = "source.kind") -> list:
+    """把一份 Scaffold 语料切成多个视图，每个返回一个 `Adaptation`。
+
+    ⚠️ **这一步决定了跑出来的是不是「多视图」。**
+
+    Scaffold 的一份语料通常是**一个知识库**（一个主题、一个填充者），
+    那不是多份独立立场，而是**一份结构的切面**。按体裁切出来的视图，
+    彼此之间的关系主要是「谁缺了什么」—— 也就是 omission 会压倒性地多，
+    而 contradiction 一条也不会有（关系没有种类）。
+
+    真要多视图，需要的是**同一主题上的多份语料**（不同模型/不同作者各填一份），
+    那才是 DCE 设计稿 §七 说的「模型 / 专家 / 论文的一个立场」。
+    本函数把这件事交给调用方：`split_by` 怎么选，决定了得到的是切面还是立场。
+    """
+    if split_by not in ("source.kind", "source.ref", "filled_by", None):
+        raise ValueError("split_by 只支持 source.kind / source.ref / filled_by / None")
+
+    groups: dict[str, list] = {}
+    for n in nodes:
+        if split_by is None:
+            key = "ALL"
+        elif split_by.startswith("source."):
+            key = str((n.get("source") or {}).get(split_by.split(".")[1]) or "（缺）")
+        else:
+            key = str(n.get(split_by) or "（缺）")
+        groups.setdefault(key, []).append(n)
+
+    out = []
+    for key in sorted(groups):
+        members = groups[key]
+        a = to_view(f"SC-{key}"[:40], members,
+                    source_ref=f"scaffold://{key}",
+                    source_kind="scaffold")
+        a.declares.insert(0, f"切分键 {split_by!r} = {key!r}（{len(members)} 个节点）")
+        a.declares.append(SOURCE_KIND_NOTE)
+        if len(members) == len(nodes):
+            a.losses.append(
+                "⚠️ 这是**整份语料**一个视图 —— 只有 1 个视图时 DCE 算不了「之间」，"
+                "调用方需要至少 2 份来源不同的语料"
+            )
+        out.append(a)
+    return out

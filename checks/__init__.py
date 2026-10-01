@@ -20,8 +20,28 @@ import sys
 # 四组测试。后三组是「度量」性质的，走 report()，不进退出码。
 # `scope` 是 §二十 排除项的可执行形式，也是断言。
 # `corpus` 是**反例扫描**：把每条结论拿到一整片配置上撞一遍。
-ASSERT_GROUPS = ("identity", "interference", "scope", "boundary")
+ASSERT_GROUPS = ("identity", "interference", "scope", "boundary", "realdata")
 MEASURE_GROUPS = ("reconstruction", "ablation", "corpus")
+
+
+def _print_asserts(mod, counters):
+    """`ok` 有三态：True 过 / False 红 / **None 跳过**。
+
+    ⚠️ 跳过必须**单独计数**，不能混进「过」。一个「语料不在就静默通过」的检查
+    与一条永远通过的检查在输出上长得一样 —— 这一整轮已经在这上面栽过两次：
+    runner 从不调用度量组、adapter 空输出通过全部边界检查。
+    """
+    total, failed, skipped = counters
+    for title, ok, detail in mod.run_all():
+        if ok is None:
+            skipped += 1
+            print(f"  跳过   {title:<40} {detail}")
+            continue
+        total += 1
+        if not ok:
+            failed += 1
+        print(f"  {'过    ' if ok else '**红的**'} {title:<40} {detail}")
+    return total, failed, skipped
 
 
 def _load(name):
@@ -38,8 +58,7 @@ def main(argv=None) -> int:
     want = args[0] if args else None
 
     print("DCE · 检查与四组测试（§十五 / §十六）\n")
-    failed = 0
-    total = 0
+    total = failed = skipped = 0
 
     for name in ASSERT_GROUPS:
         if want and want != name:
@@ -48,11 +67,7 @@ def main(argv=None) -> int:
         if mod is None:
             continue
         print(f"── {name} ──")
-        for title, ok, detail in mod.run_all():
-            total += 1
-            if not ok:
-                failed += 1
-            print(f"  {'过    ' if ok else '**红的**'} {title:<40} {detail}")
+        total, failed, skipped = _print_asserts(mod, (total, failed, skipped))
         print()
 
     # ⚠️ 度量组**也有断言**（例如 Test 3 的「每条记录过定义校验」）。
@@ -67,11 +82,7 @@ def main(argv=None) -> int:
             continue
         if hasattr(mod, "run_all"):
             print(f"── {name} · 断言 ──")
-            for title, ok, detail in mod.run_all():
-                total += 1
-                if not ok:
-                    failed += 1
-                print(f"  {'过    ' if ok else '**红的**'} {title:<40} {detail}")
+            total, failed, skipped = _print_asserts(mod, (total, failed, skipped))
             print()
         if hasattr(mod, "report"):
             print(f"── {name} · 度量（不进退出码）──")
@@ -79,7 +90,9 @@ def main(argv=None) -> int:
                 print(f"  {title:<40} {value}")
             print()
 
-    print(f"断言 {total} 条，红 {failed} 条")
+    print(f"断言 {total} 条，红 {failed} 条，跳过 {skipped} 条")
+    if skipped:
+        print(f"⚠️ **跳过不等于通过** —— 那 {skipped} 条这次没有被验证。")
     print(f"退出码 {1 if failed else 0}")
     return 1 if failed else 0
 
