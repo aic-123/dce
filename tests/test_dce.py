@@ -795,6 +795,85 @@ def test_beta_declares_what_was_not_verified():
     assert B.SORENSEN in B.FAMILIES and B.JACCARD in B.FAMILIES
 
 
+def test_approximation_assertions_pass():
+    """粗糙集那条：正域 / 依赖度 / 约简，以及**验证等价式本身**。"""
+    from checks import approximation
+    for title, ok, detail in approximation.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_gamma_one_iff_typing_is_a_function_of_signature():
+    """**γ = 1 ⟺ 类型判定完全由「出现在哪几个视图」决定。**
+
+    这不是比喻，是正域定义的推论 —— 但推论也要验。这条在几十个配置上
+    逐一对照「γ==1」与「没有签名类横跨两个决策类」，必须同真同假。
+
+    它是 §十六 那个问题（「DCE 是否只是 graph frequency bookkeeping？」）
+    的**精确定量形式**：1 − γ 就是「类型超出了频率记账」的那部分。
+    """
+    from metrics import approximation as A
+    from checks.approximation import _cfg
+    n = 0
+    for nv in (2, 3, 4, 5):
+        for plant in ({}, {"omissions": 2}, {"contradictions": 2},
+                      {"contradictions": 2, "omissions": 2, "refinements": 1}):
+            for seed in (11, 13):
+                try:
+                    views, _t = _cfg(nv, plant, seed)
+                except ValueError:
+                    continue
+                n += 1
+                a = A.approximations(views)
+                typ = A.typing(views)
+                g = len(a["positive"]) / len(a["units"])
+                spans = any(len({typ[u] for u in m}) > 1
+                            for m in a["classes"].values())
+                assert (abs(g - 1.0) < 1e-12) == (not spans), \
+                    f"等价式在 {nv}/{plant}/{seed} 上不成立：γ={g}, spans={spans}"
+    assert n >= 20, f"只对照了 {n} 个配置，太少"
+
+
+def test_alpha_and_gamma_are_different_quantities():
+    """**α 与 γ 不是一个量**，两者都要报，取舍留在判据层。
+
+    ⚠️ 这一条是核查正文时更正过的：我原先把 α 的形状挂了 γ 的名字。
+        α = |下近似| / |上近似|   （紧不紧）
+        γ = |正域|   / |全体|     （覆盖多少）
+    """
+    from metrics import approximation as A
+    from checks.approximation import _cfg
+    views, _t = _cfg(5, {"contradictions": 2, "omissions": 2, "refinements": 1}, 21)
+    g = A.gamma(views)["gamma"]
+    a = A.alpha(views)["alpha"]
+    assert g is not None and a is not None
+    assert abs(g - a) > 1e-9, \
+        f"α 与 γ 相等（都是 {g}）—— 那说明我把它们算成了同一个东西"
+    # γ 的分母是全体单元，α 是各决策类上下近似之比 —— 分母不同
+    assert 0.0 <= g <= 1.0 and 0.0 <= a <= 1.0
+
+
+def test_reducts_exclude_single_view_subsets():
+    """约简**从 k=2 起算**，不查单视图子集 —— 那是有意的。
+
+    一个视图没有「之间」：它的全部单元按定义都是共识，只有一个签名类、
+    一个决策类，**γ 恒等于 1**。那是退化，不是有信息的结果。
+    若把 k=1 放进候选，「最小约简」永远是一个视图，而那个答案什么都没说。
+    """
+    from metrics import approximation as A
+    from checks.approximation import _cfg
+    views, _t = _cfg(5, {"omissions": 2}, 31)
+    r = A.reducts(views)
+    assert not r["refused"], r
+    assert r["reducts"], "至少全体视图本身应当是一个约简"
+    assert all(len(x) >= 2 for x in r["reducts"]), \
+        f"出现了单视图约简：{r['reducts']}"
+    assert "单视图子集被有意排除" in r["note"]
+    # 而且约简真的保持 γ
+    for red in r["reducts"]:
+        sub = [v for v in views if v["id"] in red]
+        assert abs(A.gamma(sub)["gamma"] - r["gamma"]) < 1e-12
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation
