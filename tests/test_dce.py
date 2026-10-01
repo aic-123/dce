@@ -1077,8 +1077,12 @@ def test_second_level_compresses_only_on_big_buckets():
     from analysis import concepts as K
     views, _i = POS.build()
     s = K.second_level_summary(D.analyse(views), views)
-    assert s["level2_compression"] < 2, \
-        f"立场材料上二级不该显得像概括：{s['level2_compression']}"
+    off = K.second_level_summary(D.analyse(views), views, rank_filter=False)
+    on = K.second_level_summary(D.analyse(views), views)
+    assert off["level2_compression"] < 1.5, \
+        f"不过滤时该是「展开」：{off['level2_compression']}"
+    assert on["level2_compression"] > off["level2_compression"], \
+        "秩过滤没有起到任何作用"
     # 过滤开关只滤掉「展开」的桶
     all_ = K.second_level(D.analyse(views), views, only_if_compresses=False)
     flt = K.second_level(D.analyse(views), views, only_if_compresses=True)
@@ -1199,10 +1203,10 @@ def test_level_criterion_needs_both_conditions():
     for r in lv["by_rank"]:
         if r["worth_showing"]:
             assert r["n_summarizing"] > 0, \
-                f"层 {r['rank']} 被判值得显示，但没有「|Ext|>1 且 Sep>0」的概念"
-    assert lv["useful_ranks"], "一个有用层都没有 —— 判据太严了"
+                f"层 {r['intent_size']} 被判值得显示，但没有「|Ext|>1 且 Sep>0」的概念"
+    assert lv["useful_intent_sizes"], "一个有用层都没有 —— 判据太严了"
     # 深层的概念才拥有记录，浅层是冗余的
-    assert min(lv["useful_ranks"]) > 0, \
+    assert min(lv["useful_intent_sizes"]) > 0, \
         "最浅的层也被判成有用 —— 一般性概念按定义应当在子概念面前冗余"
 
 

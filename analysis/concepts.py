@@ -240,7 +240,7 @@ def stabilities(ctx: dict, seps: list) -> dict:
     return {"concepts": out, "n_refused": refused, "n_total": len(seps)}
 
 
-def rank(intent: frozenset) -> int:
+def intent_size_of(intent: frozenset) -> int:
     """概念的**层级** = 内涵的大小。这是格深度的自然刻度。"""
     return len(intent)
 
@@ -266,7 +266,7 @@ def levels(ctx: dict, seps: list) -> dict:
     """
     by: dict[int, list] = {}
     for s in seps:
-        by.setdefault(rank(s["intent"]), []).append(s)
+        by.setdefault(intent_size_of(s["intent"]), []).append(s)
     rows = []
     for k in sorted(by):
         cs = by[k]
@@ -275,7 +275,7 @@ def levels(ctx: dict, seps: list) -> dict:
         n_summarizing = sum(1 for c in cs
                             if c["sep"] > 0 and len(c["extent"]) > 1)
         rows.append({
-            "rank": k,
+            "intent_size": k,
             "n_concepts": len(cs),
             "n_multi": sum(1 for c in cs if len(c["extent"]) > 1),
             "max_extent": max((len(c["extent"]) for c in cs), default=0),
@@ -283,11 +283,11 @@ def levels(ctx: dict, seps: list) -> dict:
             "n_summarizing": n_summarizing,
             "worth_showing": n_summarizing > 0 and len(cs) < ctx["n_objects"],
         })
-    useful = [r["rank"] for r in rows if r["worth_showing"]]
-    return {"by_rank": rows, "useful_ranks": useful,
-            "deepest_useful_rank": (max(useful) if useful else None),
-            "shallowest_useful_rank": (min(useful) if useful else None),
-            "max_rank": max(by) if by else None,
+    useful = [r["intent_size"] for r in rows if r["worth_showing"]]
+    return {"by_rank": rows, "useful_intent_sizes": useful,
+            "deepest_useful_intent_size": (max(useful) if useful else None),
+            "shallowest_useful_intent_size": (min(useful) if useful else None),
+            "max_intent_size": max(by) if by else None,
             "rule": "这一层有「|Ext|>1 且 Sep>0」的概念（真的概括了不止一条记录）"
                     "且概念数 < 记录数 → 值得显示；"
                     "**三条都是结构事实，不是阈值**"}
@@ -321,19 +321,29 @@ def lattice(records: list, views, max_concepts: int = MAX_CONCEPTS) -> dict:
 
 
 def second_level(divergence: dict, views, max_concepts: int = MAX_CONCEPTS,
-                 only_if_compresses: bool = False) -> list:
+                 only_if_compresses: bool = False,
+                 rank_filter: bool = True) -> list:
     """对每个一级（主语）焦点，算它内部的二级概念。
 
     返回 `[{parent, label, n_records, concepts: [...], expands}]`。
 
-    ⚠️ `only_if_compresses` 与「显示规则」有关，而那条规则**必须是结构性的**：
+    `rank_filter=True`（默认）只保留**落在该桶自己「有用层」上的**概念 ——
+    判据见 `levels()`：`|Ext| > 1` **且** `Sep > 0`，且该层概念数 < 桶内记录数。
+    `False` 则保留全部非冗余概念（旧行为，留作对照）。
+
+    ⚠️ **为什么秩过滤是必要的**（这是接进来之后才量出来的）：
+    不加过滤时，立场材料上二级会把 20 条记录摊成 22 条（0.9x）——
+    **比记录还多**。而原因是深层概念早就退化成单条记录，展示它们不是概括。
+    秩过滤正是把那些层去掉的东西。
+
+    ⚠️ `only_if_compresses` 是**桶级**的显示规则：
 
         二级概念数 < 桶内记录数  →  它**概括**了，值得显示
-        二级概念数 ≥ 桶内记录数  →  它只是**展开**（等于把每条记录换个说法），别显示
+        二级概念数 ≥ 桶内记录数  →  它只是**展开**，别显示
 
     实测这条规则在两种材料上各占一边：
-        立场材料     20 条 / 16 特征，多数概念外延只有 1 → **展开**（1+2 级共 22 条，0.9x）
-        真实语料    192 条，桶 63/61/54/14 → **概括**（1+2 级共 25 条，7.7x）
+        立场材料     20 条 / 16 特征 → **展开**（0.9x）
+        真实语料    192 条，桶 63/61/54/14 → **概括**（7.7x）
     **所以二级不是「总是更好」，是「桶大的时候才有用」。**
     """
     from analysis import focus as F
@@ -343,18 +353,31 @@ def second_level(divergence: dict, views, max_concepts: int = MAX_CONCEPTS,
         mine = [r for r in recs_all if F.subject_of(r) == f["subject"]]
         entry = {"parent": f["focus"], "label": f["label"],
                  "subject": f["subject"], "n_records": len(mine),
-                 "concepts": [], "expands": None}
+                 "concepts": [], "expands": None, "useful_intent_sizes": None}
         if len(mine) >= 2:
             lat = lattice(mine, views, max_concepts=max_concepts)
+            entry["n_concepts_all"] = lat["n_concepts"]
+            lv = lat["levels"]
+            entry["useful_intent_sizes"] = lv["useful_intent_sizes"]
+            keep = lat["irredundant"]
+            if rank_filter:
+                # 两层过滤，用的是**同一条**判据的两半：
+                #   层  —— 这一层得**有人**在概括（`levels()` 已判）
+                #   概念 —— 留下的是**概括者本人**：`|Ext| > 1` 且 `Sep > 0`
+                #
+                # ⚠️ 逐概念这一半是补上的。只做层过滤时，S4 里仍留着一条
+                # `外延=1` 的概念 —— 而本仓库自己的判据写着
+                # 「展示恰好一条记录不是概括」。**判据说了的话要在两处都执行。**
+                keep = [c for c in keep
+                        if intent_size_of(c["intent"]) in set(lv["useful_intent_sizes"])
+                        and len(c["extent"]) > 1]
             kids = [
                 {"intent": sorted(s["intent"]), "extent": sorted(s["extent"]),
-                 "sep": s["sep"], "n_children": s["n_children"],
-                 "label": label(s["intent"])}
-                for s in sorted(lat["irredundant"],
-                                key=lambda x: (-x["sep"], -len(x["extent"])))
+                 "sep": s["sep"], "intent_size": intent_size_of(s["intent"]),
+                 "n_children": s["n_children"], "label": label(s["intent"])}
+                for s in sorted(keep, key=lambda x: (-x["sep"], -len(x["extent"])))
                 if len(s["extent"]) < len(mine)      # 去掉「整个焦点」那条平凡概念
             ]
-            entry["n_concepts_all"] = lat["n_concepts"]
             entry["expands"] = len(kids) >= len(mine)
             entry["concepts"] = [] if (only_if_compresses and entry["expands"]) \
                 else kids
@@ -362,14 +385,16 @@ def second_level(divergence: dict, views, max_concepts: int = MAX_CONCEPTS,
     return out
 
 
-def second_level_summary(divergence: dict, views) -> dict:
+def second_level_summary(divergence: dict, views,
+                         rank_filter: bool = True) -> dict:
     """二级概括的总账：一级几个、二级共几个、压缩了多少。"""
     from analysis import focus as F
-    lv2 = second_level(divergence, views)
+    lv2 = second_level(divergence, views, rank_filter=rank_filter)
     n1 = len(lv2)
     n2 = sum(len(e["concepts"]) for e in lv2)
     n_rec = len(F._all_records(divergence))
     return {"n_records": n_rec, "n_level1": n1, "n_level2": n2,
+            "rank_filter": rank_filter,
             "level1_compression": (n_rec / n1) if n1 else None,
             "total_after_level2": n1 + n2,
             "level2_compression": (n_rec / (n1 + n2)) if (n1 + n2) else None,

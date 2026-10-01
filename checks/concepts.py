@@ -145,22 +145,34 @@ def run_all() -> list:
         out.append(("超限时拒绝而不是截断（截断过的格算不对 Sep）",
                     "拒绝算" in str(e), f"报错：{str(e)[:56]}…"))
 
-    # ⑥ 显示规则：桶大时概括、桶小时只是展开 —— **两边都要出现**
-    s_pos = K.second_level_summary(d, views)
-    out.append(("二级：小桶上它只是**展开**（所以要能识别出来）",
-                s_pos["level2_compression"] < 2,
-                f"立场材料 {s_pos['n_records']} 条 → 一级 "
-                f"{s_pos['n_level1']} + 二级 {s_pos['n_level2']} = "
-                f"{s_pos['total_after_level2']} 条（{s_pos['level2_compression']:.1f}x）"
-                " —— **二级不是总是更好**"))
+    # ⑥ 显示规则：桶大时概括 —— 以及**秩过滤把「展开」治成了「概括」**
+    #
+    # ⚠️ 这条断言改过一次，而改的原因本身就是结论：
+    # 它原先断言「立场材料上二级只是展开（< 2x）」—— 那记录的是**接秩过滤之前**
+    # 的状态。秩过滤（层 + 逐概念两层）接进来之后，那份材料从 0.9x 变成 2.0x。
+    # 所以现在这条测的是**过滤本身有多管用**：
+    #
+    #     不过滤：立场材料 22 条（0.9x）  ← 展开，比记录还多
+    #     过滤后：立场材料 10 条（2.0x）  ← 概括
+    #     真实语料：25 → 19 条（7.7x → 10.1x），两种都概括
+    s_off = K.second_level_summary(d, views, rank_filter=False)
+    s_on = K.second_level_summary(d, views)
+    out.append(("`rank_filter` 把「展开」治成「概括」",
+                s_off["level2_compression"] < 1.5
+                and s_on["level2_compression"] > s_off["level2_compression"],
+                f"立场材料：不过滤 {s_off['total_after_level2']} 条"
+                f"（{s_off['level2_compression']:.1f}x）→ 过滤后 "
+                f"{s_on['total_after_level2']} 条（{s_on['level2_compression']:.1f}x）"
+                " —— **判据写对了就真的在干活**"))
     if dd and len(rv) >= 2:
-        s_real = K.second_level_summary(rd, rv)
-        out.append(("二级：大桶上它**概括**（7x 以上）",
-                    s_real["level2_compression"] > 3,
-                    f"真实语料 {s_real['n_records']} 条 → 一级 "
-                    f"{s_real['n_level1']} + 二级 {s_real['n_level2']} = "
-                    f"{s_real['total_after_level2']} 条"
-                    f"（{s_real['level2_compression']:.1f}x）"))
+        r_off = K.second_level_summary(rd, rv, rank_filter=False)
+        r_on = K.second_level_summary(rd, rv)
+        out.append(("二级：大桶上两种都**概括**（过滤不伤它）",
+                    r_on["level2_compression"] > 3,
+                    f"真实语料：{r_off['total_after_level2']} 条"
+                    f"（{r_off['level2_compression']:.1f}x）→ "
+                    f"{r_on['total_after_level2']} 条"
+                    f"（{r_on['level2_compression']:.1f}x）"))
 
     # ⑦ 过滤开关按**结构判据**工作（不是阈值）
     lv2_all = K.second_level(d, views, only_if_compresses=False)
@@ -224,8 +236,8 @@ def run_all() -> list:
              if r["worth_showing"] and r["n_summarizing"] == 0]
     out.append(("层级判据：值得显示的层必须有「|Ext|>1 且 Sep>0」的概念",
                 not wrong,
-                f"错判 {[(r['rank'], r['n_summarizing']) for r in wrong]}" if wrong
-                else f"有用层 {lv['useful_ranks']}（格最深 {lv['max_rank']}）—— "
+                f"错判 {[(r['intent_size'], r['n_summarizing']) for r in wrong]}" if wrong
+                else f"有用层 {lv['useful_intent_sizes']}（格最深 {lv['max_intent_size']}）—— "
                      "**有用的概念集中在深（具体）层，浅层是冗余的**。"
                      "判据改过两次：第二版只要求 Sep>0，于是把「只有 1 个概念、"
                      "外延只有 1 条记录」的层也放进来 —— 而展示那一条不是概括"))
