@@ -42,7 +42,11 @@ LAYOUT = {"core", "analysis", "metrics", "checks", "generators", "tests", "adapt
 # 每个包**恰好**该有的模块（§十七 逐个写死的那几个）。
 EXPECTED = {
     "core": {"view", "node", "edge", "provenance", "__init__"},
-    "analysis": {"consensus", "divergence", "focus", "synthesis", "__init__"},
+    "analysis": {"consensus", "divergence", "focus", "synthesis", "__init__",
+                 # `beta`：借自群落生态学的**周转/嵌套**分解，用来替掉四类互斥标签。
+                 # 依据是 `betapart` 1.6.1 的 CRAN 参考手册（**读过正文**）。
+                 # 它解开的正是本仓库量出的判据层毛病（四类边界随构造移动）。
+                 "beta"},
     "metrics": {"coverage", "compression", "__init__"},
     # ⚠️ `corpus` 同样是**放进去时才解释的**：
     # 前面四组各自在一个（或几个）配置上判一次，而「每条结论都在一整片配置上
@@ -72,7 +76,11 @@ EXPECTED = {
                # 半径是显式参数，且**上界由结构算出来**（`focus.calibrate`），
                # 曲线每次都报。这个模块证明机制**不是空转的** ——
                # 少了它，「半径没用」无法与「机制是死的」区分开。
-               "radius"},
+               "radius",
+               # `beta`：周转/嵌套分解的检查。定理用**精确有理数穷尽验证**
+               # （9261 组、无容差），实现按**声明的**容差对齐 ——
+               # 两件事分开测，否则分不清是定理错还是浮点错。
+               "beta"},
     # ⚠️ `adapters` 是 §十八 要求的边界层。它单列成一个顶层包，
     # **就是那条方向约束的结构形式**：核心不许 import 这一层，
     # 而 `checks/boundary.py` 把这条钉成可执行检查。

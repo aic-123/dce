@@ -713,6 +713,88 @@ def test_calibrate_reports_the_whole_curve():
     assert cal["note"], "必须给理由"
 
 
+def test_beta_assertions_pass():
+    """β 分解的全部检查，含**精确有理数穷尽验证**的定理。"""
+    from checks import beta
+    for title, ok, detail in beta.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_beta_four_types_collapse_to_two_axes():
+    """四类互斥标签 → **两个分量 + 方向**。这是借生态学要解开的那个毛病。
+
+    DCE 原先必须决定「这个单元算 refinement 还是 omission」，而那个决定
+    随构造移动（strict 召回量到 15/115）。β 分解不问「是哪一种」，
+    只问「这一对视图之间，差异里多少是替换、多少是嵌套」。
+    """
+    from analysis import beta as B
+    cases = [
+        ({"u1"}, {"u1"}, 0.0, 0.0, "consensus"),
+        ({"u1"}, {"u1", "u2"}, None, None, "nestedness"),
+        ({"u1", "u2", "u3"}, {"u1"}, None, None, "nestedness"),
+        ({"u1", "u2"}, {"u3", "u4"}, None, None, "turnover"),
+    ]
+    for ua, ub, want_total, want_nest, want_axis in cases:
+        p = B.pairwise(ua, ub)
+        assert p["axis"] == want_axis, f"{ua}/{ub} 轴错了：{p}"
+        if want_total is not None:
+            assert p["total"] == want_total and p["nestedness"] == want_nest
+    # replacement（子集）与 omission（超集）是**同一个现象的两个方向**
+    sub = B.pairwise({"u1", "u2"}, {"u1", "u2", "u3"})
+    sup = B.pairwise({"u1", "u2", "u3"}, {"u1", "u2"})
+    assert sub["turnover"] == 0.0 and sup["turnover"] == 0.0, "子集关系该是纯嵌套"
+    assert sub["nestedness"] == sup["nestedness"], "嵌套量该对称"
+    assert sub["direction"] != sup["direction"], "方向该相反"
+
+
+def test_beta_theorem_is_exhaustive_not_sampled():
+    """**定理是穷尽验证的，不是抽样的。** 而且退化情形单列。
+
+    ⚠️ 等价式的右半边改过一次：第一版写「a=0 或 b=c」，穷尽验证报出 40 组反例，
+    全是 `a=0 且 min(b,c)=0`（**其中一个视图是空的**）。
+    那时 β_嵌套 = 1，而**那是对的** —— 空集是任何集合的子集。
+    错的是定理陈述，不是代码。
+    """
+    from checks import beta
+    outs = {t: (ok, d) for t, ok, d in beta.run_all()}
+    for key in outs:
+        if key.startswith("定理：β_嵌套 ≥ 0"):
+            assert outs[key][0], outs[key][1]
+            assert "9261" in key, f"定理该在 9261 组上穷尽验证，实测：{key}"
+        if key.startswith("退化情形"):
+            assert outs[key][0], outs[key][1]
+
+
+def test_beta_multi_reduces_to_pairwise():
+    """多地点版本是本层补的（手册只给了名字与结构，没给公式），
+    所以**N=2 时必须逐位等于成对版本** —— 那是「推广没跑偏」的最低要求。"""
+    from analysis import beta as B
+    for fam in B.FAMILIES:
+        for ua, ub in (({"u1", "u2"}, {"u2", "u3"}),
+                       ({"u1"}, {"u1", "u2", "u3"}),
+                       ({"u1", "u2", "u3"}, {"u4"})):
+            p = B.pairwise(ua, ub, family=fam)
+            m = B.multi([ua, ub], family=fam)
+            for k in ("total", "turnover", "nestedness"):
+                assert abs(p[k] - m[k]) < 1e-15, f"{fam}/{k}: {p[k]} vs {m[k]}"
+
+
+def test_beta_declares_what_was_not_verified():
+    """⚠️ **「读了正文」与「只有检索片段」必须分开标注。**
+
+    `betapart` 的手册确认了两个指数族与六个分量名，**但没给公式**。
+    所以 Sorensen 族的三式是核过的，**Jaccard 族的变换是本层补的重建**。
+    这条测试钉住那处声明 —— 把它删掉就等于宣称全部核过，那是假的。
+    """
+    import pathlib
+    src = pathlib.Path(__file__).resolve().parent.parent / "analysis" / "beta.py"
+    text = src.read_text(encoding="utf-8")
+    assert "本层补的" in text and "没有对着正文核过" in text, \
+        "beta.py 必须声明哪一步是未核正文的重建"
+    from analysis import beta as B
+    assert B.SORENSEN in B.FAMILIES and B.JACCARD in B.FAMILIES
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation
