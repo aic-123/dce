@@ -34,8 +34,22 @@ from . import divergence as D
 from . import focus as F
 
 
-def build(views, radius: int = 0, focus_basis: str = "subject") -> dict:
+def build(views, radius: int = 0, focus_basis: str = "subject",
+          consensus_rule: str = "singleton") -> dict:
     """从一组视图算出合成结构。**只读入参。**
+
+    `consensus_rule` 选共识的**观点群**来源（见 `analysis/consensus.py`）：
+
+        "singleton"  **每视图自成一群 → 退化成合取**（默认）
+        "declared"   材料自己声明的（`metadata["group"]`）
+        "refinement" 精炼闭包导出的
+        "auto"       按优先级：声明 > 精炼 > 每视图一群
+
+    ⚠️ **默认是 `"singleton"`，不是 `"auto"`** —— 这一条是**量出来的**：
+    改成 `auto` 之后，`checks/corpus.py` 的 C2/C3 从 600/600 掉到 **456/600**，
+    因为合成语料本来就**植入**精炼关系，于是共识被静默换成了分群版。
+    而「DCE 的划分 == 并集+频率的划分」那三条不变量是**合取**的性质 ——
+    **默认不许改行为**。要分群共识就显式要，而用了哪条规则记进溯源。
 
     `focus_basis` 选焦点的**依据**：
 
@@ -50,7 +64,13 @@ def build(views, radius: int = 0, focus_basis: str = "subject") -> dict:
     """
     V.check_distinct(views)
 
-    cons = C.consensus(views)
+    # ⚠️ 共识的**观点群**：`auto` 走优先级 —— 材料声明的 > 精炼导出的 > 每视图一群。
+    # 用了哪条规则、分了几个群、救回几条单元，**都要记进溯源** ——
+    # 换了分法产物就应当看得出换了（与 `focus_radius` 同一条规矩）。
+    cons_groups, cons_rule = C.groups_for(views, consensus_rule)
+    cons_diag = C.consensus_diagnostic(views, cons_groups)
+
+    cons = C.consensus(views, cons_groups)
     div = D.analyse(views)
     if focus_basis == "subject":
         fx = F.subject_foci(div, "structure")
@@ -108,7 +128,13 @@ def build(views, radius: int = 0, focus_basis: str = "subject") -> dict:
             # 半径是**显式记录**的：换了值，产物就应当看得出换了值
             "focus_radius": radius,
             "focus_basis": focus_basis,
+            # 共识用了哪个群、怎么来的、救回几条 —— 同上
+            "consensus_rule": cons_rule,
+            "consensus_groups": [sorted(g) for g in cons_groups],
+            "consensus_rescued": cons_diag["n_rescued"],
         },
+        # 诊断（**这份材料的群结构能不能改变任何判定**）—— 它是一句可执行的判断
+        "consensus_diagnostic": cons_diag,
     }
 
 

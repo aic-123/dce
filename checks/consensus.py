@@ -168,6 +168,84 @@ def run_all() -> list:
                        "（**退化**，被标出来）")
     out.append(("⚠️ 两份现成材料都**不触发**这个机制（事实，不是缺点）", ok8, detail))
 
+    # ⑨ **材料自己声明的群**，以及它与「精炼导出」是否一致
+    #
+    # 两条**独立的路**导出了同一个分组，那本身是个信号：
+    # 作者说「P3 是 P1 的变体」，而结构说 `units(P1) ⊊ units(P3)` —— 两者吻合。
+    decl = C.groups_from_metadata(pv)
+    ref = C.groups_from_refinement(pv)
+    norm = lambda gs: sorted(sorted(g) for g in gs)
+    out.append(("材料声明的群与精炼导出的群**一致**（两条独立的路）",
+                C.has_declared_groups(pv) and norm(decl) == norm(ref),
+                f"声明 {norm(decl)}；精炼 {norm(ref)} —— "
+                "作者说「P3 是 P1 的变体」，结构与之一致"))
+
+    # ⑩ **声明优先于推导**（两者不一致时）
+    #
+    # 声明的群是**材料对它自己结构的陈述**，比算法导出的更可信。
+    from core import view as V
+    def mkg(vid, nodes, group):
+        return V.make_view(view_id=vid, source_ref=f"x://{vid}",
+                           source_kind="experiment", nodes=sorted(nodes),
+                           edges=[], metadata={"group": group})
+    # A ⊊ B（精炼会并成一群），但作者声明 A、B 是**两个**立场
+    vs = [mkg("A", ["x"], "立场一"), mkg("B", ["x", "y"], "立场二"),
+          mkg("C", ["x"], "立场一")]
+    g_auto, rule_auto = C.groups_for(vs, "auto")
+    g_ref = C.groups_from_refinement(vs)
+    out.append(("**声明优先于推导**（不一致时以声明为准）",
+                rule_auto == "declared" and norm(g_auto) != norm(g_ref),
+                f"auto 用 {rule_auto} → {norm(g_auto)}；而精炼会导出 "
+                f"{norm(g_ref)} —— 声明赢。**材料对它自己结构的陈述比算法导出的可信**"))
+
+    # ⑪ 声明**不完整**就报错，不悄悄补齐
+    partial = [mkg("A", ["x"], "立场一"), V.make_view(
+        view_id="B", source_ref="x://B", source_kind="experiment",
+        nodes=["x", "y"], edges=[])]      # 这个没声明
+    try:
+        C.groups_from_metadata(partial)
+        out.append(("声明不完整时报错，不悄悄补齐", False, "**竟然没报错**"))
+    except C.ConsensusError as e:
+        out.append(("声明不完整时报错，不悄悄补齐",
+                    "不补默认值" in str(e),
+                    f"报错：{str(e)[:56]}… —— "
+                    "「没声明的那部自成一群」会让产物看起来正常而含义已变"))
+
+    # ⑫ 诊断：分群**只会放宽**，绝不会收紧（`n_lost` 恒为 0）
+    d = C.consensus_diagnostic(pv)
+    out.append(("诊断：分群只会放宽共识（`n_lost` 恒为 0）",
+                d["n_lost"] == 0 and d["n_consensus_grouped"] >= d["n_consensus_flat"],
+                f"合取 {d['n_consensus_flat']} → 分群 {d['n_consensus_grouped']}，"
+                f"救回 {d['n_rescued']}、丢失 {d['n_lost']} —— "
+                "分群是**放宽合取**（每群至少一个），不可能收紧"))
+
+    # ⑬ **禁词守卫抓到过这个键名**
+    #
+    # 第一版诊断的键叫 `verdict`，而 `verdict` 在 `synthesis.FORBIDDEN_KEYS` 里
+    # （§二十 禁真值判断），产物检查当场拦住。改成 `reading`（读法）：
+    # 它说的是「这份材料的结构能支持什么」，不是「这份材料对不对」。
+    from analysis import synthesis as SY
+    hits = SY.forbidden_keys_in({"consensus_diagnostic": d})
+    out.append(("⚠️ 诊断的键名不撞禁词表（`verdict` → `reading`）",
+                not hits,
+                f"命中 {hits}" if hits else
+                "`reading` 不在禁词表里 —— 第一版叫 `verdict` 被守卫拦住了。"
+                "**守卫响了就改东西，不许豁免**（本仓库第二次栽在这上面，"
+                "上一次是字段叫 `rank`）"))
+
+    # ⑭ `build` 的默认**不改行为**，而 `auto` 会取声明
+    from analysis import synthesis as S2
+    s_def = S2.build(pv)
+    s_auto = S2.build(pv, consensus_rule="auto")
+    out.append(("`build` 默认用 singleton（不改行为），`auto` 才取声明",
+                s_def["provenance"]["consensus_rule"] == "singleton"
+                and s_auto["provenance"]["consensus_rule"] == "declared"
+                and len(s_def["consensus"]["records"])
+                == len(s_auto["consensus"]["records"]),
+                "默认 singleton，共识 7 条；`auto` → declared，共识也是 7 条。"
+                "⚠️ **默认必须是 singleton**：改成 auto 后 C2/C3 从 600/600 "
+                "掉到 456/600，因为合成语料本来就植入精炼关系"))
+
     return out
 
 

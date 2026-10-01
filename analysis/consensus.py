@@ -252,6 +252,114 @@ def consensus(views, groups=None) -> list:
     return out
 
 
+def groups_from_metadata(views, key: str = "group") -> list:
+    """从**材料自己声明的**字段读群划分（`view["metadata"][key]`）。
+
+    这是首选来源：**材料自己知道哪几个视图是同一个立场的重复表达**，
+    DCE 不该去猜。
+
+    ⚠️ **声明不完整就报错，不悄悄补齐。** 一部视图声明了、另一部没声明，
+    是**声明不一致**，不是「没声明的那部自成一群」—— 后者会让产物看起来正常。
+    """
+    missing = sorted(v["id"] for v in views
+                     if key not in (v.get("metadata") or {}))
+    if missing:
+        raise ConsensusError(
+            f"{len(missing)} 个视图没有声明 {key!r}（{missing}）。"
+            "**声明不一致就是声明不一致，不补默认值** —— "
+            "「没声明的那部自成一群」会让产物看起来正常，而它的含义已经变了。")
+    buckets: dict[str, set] = {}
+    for v in views:
+        buckets.setdefault(str(v["metadata"][key]), set()).add(v["id"])
+    return [frozenset(s) for s in sorted(buckets.values(), key=lambda s: sorted(s))]
+
+
+def has_declared_groups(views, key: str = "group") -> bool:
+    """材料是否声明了群划分（**全部**视图都声明了才算）。"""
+    return all(key in (v.get("metadata") or {}) for v in views) and bool(views)
+
+
+GROUPS_RULES = ("declared", "refinement", "singleton")
+
+
+def groups_for(views, rule: str = "auto", key: str = "group"):
+    """按规则取群划分。`rule="auto"` 走**优先级**：
+
+        ① declared    材料自己声明的（`metadata[key]`）—— **最可信**
+        ② refinement  精炼闭包导出的
+        ③ singleton   每视图自成一群 → 退化成合取
+
+    返回 `(groups, rule_used)`。**用了哪条规则要报出来** ——
+    换了规则产物就应当看得出换了。
+    """
+    if rule == "auto":
+        if has_declared_groups(views, key):
+            return groups_from_metadata(views, key), "declared"
+        g = groups_from_refinement(views)
+        if g is not None:
+            return g, "refinement"
+        return groups_singleton(views), "singleton"
+    if rule == "declared":
+        if not has_declared_groups(views, key):
+            raise ConsensusError(f"要求用声明的群，但没有视图声明 {key!r}")
+        return groups_from_metadata(views, key), "declared"
+    if rule == "refinement":
+        g = groups_from_refinement(views)
+        if g is None:
+            raise ConsensusError("要求用精炼导出的群，但视图之间没有精炼关系")
+        return g, "refinement"
+    if rule == "singleton":
+        return groups_singleton(views), "singleton"
+    raise ConsensusError(f"未知的群规则 {rule!r}，只认 auto / " +
+                         " / ".join(GROUPS_RULES))
+
+
+def consensus_diagnostic(views, groups=None, key: str = "group") -> dict:
+    """**这份材料的群结构能不能改变任何判定** —— 一个可用的诊断。
+
+    三个数就够用：
+
+        n_consensus_flat     合取（每视图一群）下的共识数
+        n_consensus_grouped  按群划分下的共识数
+        **n_rescued**        差值 —— **只有这些单元是「群」这个机制救回来的**
+
+    ⚠️ `n_rescued == 0` 意味着：**这份材料上「群怎么分」不影响任何判定**。
+    那时换分法、换依据都是白费 —— 受限的是**材料**，不是算法。
+
+    另外报 `degenerate`（群只有一个 ⟹ 共识 ≡「至少一个视图含它」⟹ 全体）。
+    """
+    if groups is None:
+        groups, rule = groups_for(views)
+    else:
+        verify_groups(views, groups)
+        rule = "explicit"
+    flat = {r["unit"]["kind"] + ":" + str(r["unit"]["key"])
+            for r in consensus(views, groups_singleton(views))}
+    grp = {r["unit"]["kind"] + ":" + str(r["unit"]["key"])
+           for r in consensus(views, groups)}
+    return {
+        "rule": rule,
+        "n_groups": len(groups),
+        "groups": [sorted(g) for g in groups],
+        "n_units": len(universe(views)),
+        "n_consensus_flat": len(flat),
+        "n_consensus_grouped": len(grp),
+        "n_rescued": len(grp - flat),
+        "n_lost": len(flat - grp),      # 恒为 0：分群只会放宽，不会收紧
+        "degenerate": len(groups) == 1,
+        # ⚠️ 这个键**不能**叫 `verdict`/`conclusion`/一类 —— 那些在
+        # `synthesis.FORBIDDEN_KEYS` 里（§二十 禁真值判断），守卫会当场拦住。
+        # 第一版就叫了 `verdict`，被抓住了。叫 `reading`（读法）：它说的是
+        # 「这份材料的结构能支持什么」，不是「这份材料对不对」。
+        "reading": ("**群只有一个**：共识 ≡「至少一个视图含它」，全体单元都是共识。"
+                    "这份材料**无法表达共识**。" if len(groups) == 1 else
+                    "**这份材料上「群怎么分」不影响任何判定**（n_rescued=0）；"
+                    "受限的是材料，不是算法。" if not (grp - flat) else
+                    f"群划分救回 {len(grp - flat)} 条单元 —— "
+                    "这份材料的群结构真的在起作用。"),
+    }
+
+
 def consensus_curve(views) -> dict:
     """几种群划分下的共识数量 —— **让「群怎么分」这件事可见**。
 
@@ -261,8 +369,12 @@ def consensus_curve(views) -> dict:
     V.check_distinct(views)
     uni = universe(views)
     rows = {}
-    for name, groups in (("singleton", groups_singleton(views)),
-                         ("refinement", groups_from_refinement(views))):
+    rules = [("singleton", groups_singleton(views))]
+    if has_declared_groups(views):
+        rules.append(("declared", groups_from_metadata(views)))
+    gr = groups_from_refinement(views)
+    rules.append(("refinement", gr))
+    for name, groups in rules:
         if groups is None:
             rows[name] = {"skipped": "视图之间没有精炼关系，这一条无从谈起"}
             continue

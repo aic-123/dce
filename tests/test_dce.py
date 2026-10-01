@@ -1510,6 +1510,111 @@ def test_refinement_groups_are_transitive_and_none_when_absent():
     assert C.groups_from_refinement(disjoint) is None
 
 
+def test_declared_groups_beat_derived_ones():
+    """**材料声明的群优先于算法推导的群。**
+
+    声明的群是**材料对它自己结构的陈述**，比算法从精炼关系导出的更可信。
+    构造一个两者不一致的材料：
+
+        A = {x}、B = {x, y} —— `A ⊊ B`，精炼会并成一群
+        但作者声明 A 是「立场一」、B 是「立场二」、C 是「立场一」
+
+    于是 `auto` 必须用声明（`[[A,C],[B]]`），而不是精炼导出（`[[A,B,C]]`）。
+    """
+    from analysis import consensus as C
+    from core import view as V
+
+    def mk(vid, nodes, group):
+        return V.make_view(view_id=vid, source_ref=f"x://{vid}",
+                           source_kind="experiment", nodes=sorted(nodes),
+                           edges=[], metadata={"group": group})
+    vs = [mk("A", ["x"], "立场一"), mk("B", ["x", "y"], "立场二"),
+          mk("C", ["x"], "立场一")]
+    g, rule = C.groups_for(vs, "auto")
+    assert rule == "declared", f"该用声明，却用了 {rule}"
+    assert sorted(sorted(x) for x in g) == [["A", "C"], ["B"]], g
+    ref = C.groups_from_refinement(vs)
+    assert sorted(sorted(x) for x in ref) == [["A", "B", "C"]], ref
+
+
+def test_incomplete_group_declaration_is_refused():
+    """声明**不完整**就报错 —— **不补默认值**。
+
+    「没声明的那部自成一群」会让产物看起来正常，而它的含义已经变了。
+    """
+    from analysis import consensus as C
+    from core import view as V
+
+    def mk(vid, nodes, group=None):
+        md = {"group": group} if group else {}
+        return V.make_view(view_id=vid, source_ref=f"x://{vid}",
+                           source_kind="experiment", nodes=sorted(nodes),
+                           edges=[], metadata=md)
+    partial = [mk("A", ["x"], "立场一"), mk("B", ["x", "y"])]
+    assert C.has_declared_groups(partial) is False
+    try:
+        C.groups_from_metadata(partial)
+    except C.ConsensusError as e:
+        assert "不补默认值" in str(e)
+        return
+    raise AssertionError("声明不完整却没报错")
+
+
+def test_grouping_only_relaxes_consensus():
+    """分群**只会放宽**共识，绝不会收紧 —— `n_lost` 恒为 0。
+
+    理由：合取是「每个群都有」在每组只有一个视图时的特例；
+    分群把「每个视图都有」放宽成「每个群至少一个有」，所以是单调放宽。
+    """
+    from generators import positions as POS
+    from analysis import consensus as C
+    views, _i = POS.build()
+    d = C.consensus_diagnostic(views)
+    assert d["n_lost"] == 0
+    assert d["n_consensus_grouped"] >= d["n_consensus_flat"]
+    # 而诊断必须把「群结构能不能改变判定」说出来，不能只给数
+    assert d["reading"], "诊断没有给出读法"
+    assert d["n_rescued"] == 0, "立场材料上救回数变了 —— 读法要重写"
+
+
+def test_forbidden_key_guard_caught_the_diagnostic_key_name():
+    """**禁词守卫第二次抓到我的字段名。**
+
+    第一版诊断的键叫 `verdict`，而它在 `synthesis.FORBIDDEN_KEYS` 里
+    （§二十 禁真值判断）。改成 `reading`（读法）—— 它说的是
+    「这份材料的结构能支持什么」，不是「这份材料对不对」。
+
+    上一次是字段叫 `rank`。**守卫响了就改东西，不许豁免。**
+    """
+    from generators import positions as POS
+    from analysis import consensus as C
+    from analysis import synthesis as SY
+    views, _i = POS.build()
+    d = C.consensus_diagnostic(views)
+    assert "verdict" not in d, "`verdict` 又回来了 —— 它在禁词表里"
+    assert not SY.forbidden_keys_in({"consensus_diagnostic": d})
+
+
+def test_synthesis_default_does_not_change_consensus_behaviour():
+    """`build` 的共识默认是 `singleton`，**不是** `auto`。
+
+    ⚠️ 这是**量出来的**：改成 `auto` 之后 `checks/corpus.py` 的 C2/C3
+    从 600/600 掉到 **456/600** —— 合成语料本来就**植入**精炼关系，
+    于是共识被静默换成了分群版，而「划分 == 并集+频率」那三条不变量
+    是**合取**的性质。**默认不许改行为。**
+    """
+    from generators import positions as POS
+    from analysis import consensus as C
+    from analysis import synthesis as S
+    views, _i = POS.build()
+    assert S.build(views)["provenance"]["consensus_rule"] == "singleton"
+    assert S.build(views, consensus_rule="auto")["provenance"]["consensus_rule"] \
+        == "declared"
+    # 默认产物与裸合取逐位相同
+    flat = C.consensus(views, C.groups_singleton(views))
+    assert S.build(views)["consensus"]["records"] == flat
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation

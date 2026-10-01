@@ -113,6 +113,27 @@ SOURCES = {
 }
 
 
+# ── 观点群的**声明** ────────────────────────────────────────────────
+#
+# ⚠️ 这三份视图不是一个一个独立的立场，而是**两个**立场：
+#
+#     P1  「损失聚合与裁剪上界这条路线」
+#     P3  「P1 加上例外与案例」        ← 材料自己说它是 P1 的变体
+#     P2  「归一化偏差这条路线」
+#
+# P3 的标签就写着「P1 加上……」，而 `units(P1) ⊊ units(P3)` ——
+# **同一个立场的两种完整度，不是两个立场。** 一个立场被两份视图重复表达，
+# 那正是 `§C7.1 ①` 的「观点群」要处理的事：**重复表达不该算两份独立意见。**
+#
+# 所以这里**声明**出来，而不是留给算法去猜。这是**两条独立的路导出同一个分组**
+# （声明 vs `groups_from_refinement` 的精炼闭包），而它们一致 —— 那本身是个信号。
+POSITION_GROUPS = {
+    "P1": "损失聚合与裁剪上界这条路线",
+    "P3": "损失聚合与裁剪上界这条路线",
+    "P2": "归一化偏差这条路线",
+}
+
+
 def build() -> tuple:
     """造出三份视图，并返回 `(views, intent)`。
 
@@ -134,7 +155,9 @@ def build() -> tuple:
             nodes=nodes, edges=edges,
             metadata={"labels": {n: VOCAB[n] for n in nodes},
                       "authored": True,
-                      "label": spec["label"]},
+                      "label": spec["label"],
+                      # 材料**自己声明**它属于哪个观点群（见 POSITION_GROUPS）
+                      "group": POSITION_GROUPS[pid]},
         ))
 
     intent = {
