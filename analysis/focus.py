@@ -205,6 +205,168 @@ def _groups(uf, n) -> dict:
     return out
 
 
+# ── 自然近邻 + kNN 分量：**换一种合并规则，而不是换一个尺度** ──────────
+#
+# ⚠️ 这一节的存在理由，是一条推导出来的结论：
+#
+#     并查集是**传递闭包**。在连通的共享节点空间上，**任何半径**（含 0）
+#     都会把所有分歧并成一团。所以「半径该取多大」这个问题
+#     **在连通图上没有正确答案** —— 毛病不在尺度，在**合并规则**。
+#
+# 而 `knn_zones`（scanstatistics）给的是另一半：**kNN 图是稀疏的**
+# （每个点只连最近的 k 个），所以它的**连通分量不会塌成一团**。
+# 两者合起来才是完整方案：
+#
+#     距离            用结构图上的跳数（共享节点空间，§七 的前提）
+#     候选邻域        每条记录只连最近的 k 条
+#     分组            取 kNN 图的**弱连通分量**（不是全可达）
+#     k 取多少        **自然近邻**准则（不选 k，取饱和点）
+#
+# 自然近邻（natural nearest neighbor，改自 Zhu/Feng/Huang 2016, PRL 80:30-36；
+# 出处是 CRAN `FuzzySpec` 参考手册）：让 k 从 1 递增，统计 kNN 图里
+# **入度为 0**（没有任何人是它的近邻）的点的个数，**该数不再下降时停**。
+# 原文称这是 `parameter-free way to adaptively set the neighbourhood size`。
+
+
+def _dist_between(adj, sa: set, sb: set, cap: int):
+    """两个锚点集之间在结构图上的最短跳数。超过 `cap` 返回 `None`（不硬凑）。"""
+    if sa & sb:
+        return 0
+    seen = set(sa)
+    frontier = set(sa)
+    d = 0
+    while frontier and d < cap:
+        d += 1
+        nxt = set()
+        for u in frontier:
+            for x in adj.get(u, ()):
+                if x in sb:
+                    return d
+                if x not in seen:
+                    seen.add(x)
+                    nxt.add(x)
+        frontier = nxt
+    return None
+
+
+def record_distances(records, adj, cap: int = 8) -> list:
+    """分歧记录两两之间的距离。返回上三角距离表 `{(i,j): dist or None}`。
+
+    距离 = **两个锚点集在结构图上的最短跳数**。用共享节点空间来量是有理由的：
+    `§七` 的前提就是视图已经映射到那个空间。
+    """
+    an = [anchors(r) for r in records]
+    out = {}
+    for i in range(len(records)):
+        for j in range(i + 1, len(records)):
+            out[(i, j)] = _dist_between(adj, an[i], an[j], cap)
+    return out
+
+
+def _nearest(dists, n, i, k):
+    """第 i 条记录的 k 个最近邻（距离为 `None` 的不算）。平局按键序，保证确定性。"""
+    cand = []
+    for j in range(n):
+        if j == i:
+            continue
+        d = dists.get((i, j), dists.get((j, i)))
+        if d is None:
+            continue
+        cand.append((d, j))
+    cand.sort()
+    return [j for _d, j in cand[:k]]
+
+
+def natural_k(records, adj, kmax: int = 10, cap: int = 8) -> dict:
+    """**自然近邻**：k 递增到「入度为 0 的记录数」不再下降为止。
+
+    ⚠️ 计数的是**入度为 0**（没有任何记录把谁当作最近邻），不是「没有邻居」——
+    后者在 k=1 时就恒为 0，准则会立刻失效。这一点容易写错，所以单列出来。
+    """
+    n = len(records)
+    dists = record_distances(records, adj, cap=cap)
+    trace, prev = [], None
+    for k in range(1, kmax + 1):
+        indeg = [0] * n
+        for i in range(n):
+            for j in _nearest(dists, n, i, k):
+                indeg[j] += 1
+        zeros = sum(1 for x in indeg if x == 0)
+        trace.append((k, zeros))
+        if prev is not None and zeros >= prev:
+            return {"k": k - 1 if k > 1 else 1, "trace": trace,
+                    "reason": f"k={k} 时入度为 0 的记录数不再下降（{prev}→{zeros}）"}
+        prev = zeros
+    return {"k": kmax, "trace": trace,
+            "reason": f"到 kmax={kmax} 仍在下降，取 kmax"}
+
+
+def knn_foci(divergence: dict, views, k: int | None = None,
+             cap: int = 8) -> dict:
+    """用 **kNN 图的弱连通分量**分焦点 —— 换合并规则，不是换尺度。
+
+    `k=None` 时用自然近邻准则定 k（**不选 k**）。返回
+    `{foci, k, natural, n_isolated}`。
+
+    ⚠️ 与 `foci()` 的区别是**合并规则**，不是参数：
+    `foci()` 用「距离 ≤ r 就并」（传递闭包，连通图上必塌成一团）；
+    本函数只连最近的 k 条，再取**弱连通分量** —— 图是稀疏的，所以不会塌。
+    """
+    records = []
+    for t in ("refinement", "contradiction", "alternative", "omission"):
+        records.extend(divergence.get(t, []))
+    n = len(records)
+    if n == 0:
+        return {"foci": [], "k": 0, "natural": None, "n_isolated": 0}
+
+    adj = structure_graph(views)
+    nat = natural_k(records, adj, cap=cap)
+    kk = nat["k"] if k is None else k
+    dists = record_distances(records, adj, cap=cap)
+
+    uf = _UF(n)
+    indeg = [0] * n
+    for i in range(n):
+        for j in _nearest(dists, n, i, kk):
+            uf.union(i, j)
+            indeg[j] += 1
+    groups = [sorted(v) for v in _groups(uf, n).values()]
+    groups.sort(key=lambda idxs: min(_unit_key_of(records[i]) for i in idxs))
+    return {"foci": _materialize(groups, records), "k": kk, "natural": nat,
+            "n_isolated": sum(1 for x in indeg if x == 0),
+            "n_records": n}
+
+
+def _materialize(clusters, records) -> list:
+    """把簇下标列表变成焦点记录（与 `foci()` 同一个形状）。"""
+    out = []
+    for n, idxs in enumerate(clusters, start=1):
+        recs = [records[i] for i in idxs]
+        types: dict[str, int] = {}
+        for r in recs:
+            types[r["type"]] = types.get(r["type"], 0) + 1
+        units = []
+        for r in recs:
+            if "unit" in r:
+                units.append((r["unit"]["kind"], r["unit"]["key"]))
+            elif r["type"] == "contradiction":
+                for rel in r["relations"]:
+                    units.append(("edge", (r["from"], r["to"], rel)))
+            else:
+                for _vid, targets in r["views"].items():
+                    for x in targets:
+                        units.append(("edge", (r["source"], x, r["relation"])))
+        out.append({
+            "focus": f"F{n}",
+            "size": len(recs),
+            "types": {k: types[k] for k in sorted(types)},
+            "units": sorted(set(units), key=lambda x: (x[0], str(x[1]))),
+            "anchors": sorted(set().union(*[anchors(r) for r in recs])),
+            "sources": prov.merge(*[r["sources"] for r in recs]),
+        })
+    return out
+
+
 
 def _unit_key_of(record):
     """一条记录的「单元键」，用于确定性排序。"""
@@ -234,34 +396,10 @@ def foci(divergence: dict, radius: int = 0, views=None) -> list:
     clusters = cluster(records, radius=radius, adj=adj)
     # 按簇内最小单元键排序 → 编号确定，不随输入顺序变，也不随大小变
     clusters.sort(key=lambda idxs: min(_unit_key_of(records[i]) for i in idxs))
-
-    out = []
-    for n, idxs in enumerate(clusters, start=1):
-        recs = [records[i] for i in idxs]
-        types: dict[str, int] = {}
-        for r in recs:
-            types[r["type"]] = types.get(r["type"], 0) + 1
-        units = []
-        for r in recs:
-            if "unit" in r:
-                units.append((r["unit"]["kind"], r["unit"]["key"]))
-            elif r["type"] == "contradiction":
-                for rel in r["relations"]:
-                    units.append(("edge", (r["from"], r["to"], rel)))
-            else:
-                for vid, targets in r["views"].items():
-                    for x in targets:
-                        units.append(("edge", (r["source"], x, r["relation"])))
-        an = sorted(set().union(*[anchors(r) for r in recs])) if recs else []
-        out.append({
-            "focus": f"F{n}",
-            "size": len(recs),
-            "types": {k: types[k] for k in sorted(types)},
-            "units": sorted(set(units), key=lambda x: (x[0], str(x[1]))),
-            "anchors": an,
-            "sources": prov.merge(*[r["sources"] for r in recs]) if recs else [],
-        })
-    return out
+    # ⚠️ 物化只有**一处实现**（`_materialize`）。原先这里另写了一遍，
+    # 而 `knn_foci` 又需要同一段逻辑 —— 判据写两遍就一定会漂，
+    # 本仓库在 `refinement` 上已经吃过一次这个亏。
+    return _materialize(clusters, records)
 
 
 # ── 半径的**校准**：上界由结构算出来，不由人选 ──────────────────────

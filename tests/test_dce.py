@@ -874,6 +874,71 @@ def test_reducts_exclude_single_view_subsets():
         assert abs(A.gamma(sub)["gamma"] - r["gamma"]) < 1e-12
 
 
+def test_natural_k_is_self_consistent():
+    """自然近邻准则：入度为 0 的记录数随 k **单调不增**。
+
+    出处是 CRAN `FuzzySpec` 的 `find.radius`（自然近邻，改自 Zhu/Feng/Huang 2016）：
+    让 k 递增，直到「入度为 0 的点数」不再下降。
+    ⚠️ 计数的是**入度为 0**（没有任何人把谁当作最近邻），**不是「没有邻居」**——
+    后者在 k=1 时就恒为 0，准则会立刻失效。这一点容易写错。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _i = POS.build()
+    d = D.analyse(views)
+    recs = [r for t in ("refinement", "contradiction", "alternative", "omission")
+            for r in d[t]]
+    nat = F.natural_k(recs, F.structure_graph(views))
+    zeros = [z for _k, z in nat["trace"]]
+    assert all(zeros[i] >= zeros[i + 1] for i in range(len(zeros) - 1)), zeros
+    assert zeros[-1] == 0 or nat["k"] > 1, "准则该在饱和处停"
+
+
+def test_focus_collapses_under_both_merge_rules():
+    """**设计级结论**：立场材料上，换尺度不行，换合并规则也不行。
+
+    ⚠️ 这条记的是一次**被证伪的假设**。我以为 kNN 图稀疏、所以它的连通分量
+    不会塌成一团。实测：**每一个 k** 都是 1 个焦点。
+
+    于是结论比原先强：§十一 的焦点机制在它**设计的输入上**不产生结构 ——
+    毛病不在尺度、也不在合并规则，而在「用**结构邻近性**给分歧分组」
+    这个依据本身。真正的多视图分歧在共享空间上**到处都在**（那正是
+    「就同一个议题争执」的含义），所以按邻近性分组必然并成一团。
+
+    对照组：材料**有断裂**时（真实语料按体裁切），新规则在小 k 下更细
+    （旧规则 9 → 新规则 k=1 时 12）—— 它不是一无所长，只是解不了这个问题。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _i = POS.build()
+    d = D.analyse(views)
+    old = {len(F.foci(d, radius=r, views=views)) for r in range(0, 5)}
+    new = {len(F.knn_foci(d, views=views, k=k)["foci"])
+           for k in (1, 2, 3, 5, 8)}
+    assert old == {1} and new == {1}, f"旧 {old}／新 {new} —— 结论变了，请更新本条与文档"
+
+
+def test_natural_k_objective_is_opposite_to_focus_grouping():
+    """自然近邻选出的 k，恰好是「全都并上了」的那个 k。
+
+    它的目标是「**没有孤立点**」（人人都有邻居），
+    焦点分组要的是「**组之间别并**」—— **两者目标相反**。
+    所以它不适合当焦点分组的尺度选择器，尽管它是个很好的
+    parameter-free 准则（用它自己的目标衡量）。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _i = POS.build()
+    d = D.analyse(views)
+    recs = [r for t in ("refinement", "contradiction", "alternative", "omission")
+            for r in d[t]]
+    nat = F.natural_k(recs, F.structure_graph(views))
+    assert len(F.knn_foci(d, views=views, k=nat["k"])["foci"]) == 1
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation

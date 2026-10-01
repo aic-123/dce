@@ -94,12 +94,63 @@ def _degenerate_cases() -> list:
 def run_all() -> list:
     out = []
 
-    # ① 既有行为不变：radius=0 与旧签名一致
+    # ⓪ 自然近邻 + kNN 分量：**换合并规则**（不是换尺度），以及一条负面结论
+    #
+    # ⚠️ 这一节记的是**又一次被证伪的假设**。我以为 kNN 图稀疏、所以它的
+    # 连通分量不会塌成一团。实测：在立场材料上**每一个 k** 都是 1 个焦点。
+    #
+    # 于是结论比我原先想的更强：
+    #   §十一 的焦点机制在它**设计的输入上**不产生结构 ——
+    #   **换尺度不行（半径扫遍），换合并规则也不行（kNN 分量）。**
     from generators import positions as POS
-    pv, _ = POS.build()
+    from analysis import divergence as D
+    pv, _i = POS.build()
     pd = D.analyse(pv)
-    n_old = len(F.foci(pd))
-    n_zero = len(F.foci(pd, radius=0, views=pv))
+
+    nat = F.natural_k(
+        [r for t in ("refinement", "contradiction", "alternative", "omission")
+         for r in pd[t]], F.structure_graph(pv))
+    zeros = [z for _k, z in nat["trace"]]
+    out.append(("自然近邻：入度为 0 的记录数随 k **单调不增**（准则本身自洽）",
+                all(zeros[i] >= zeros[i + 1] for i in range(len(zeros) - 1)),
+                f"轨迹（k, 入度0）={nat['trace'][:6]} → 取 k={nat['k']}"))
+
+    old = {r: len(F.foci(pd, radius=r, views=pv)) for r in range(0, 5)}
+    new = {k: len(F.knn_foci(pd, views=pv, k=k)["foci"]) for k in (1, 2, 3, 5, 8)}
+    out.append(("⚠️ 立场材料上**两种合并规则都塌成 1 个焦点**",
+                set(old.values()) == {1} and set(new.values()) == {1},
+                f"旧规则（距离≤r）r=0..4 → {sorted(set(old.values()))}；"
+                f"新规则（kNN 分量）k=1,2,3,5,8 → {sorted(set(new.values()))} —— "
+                "**这是设计级结论**：毛病不在尺度、也不在合并规则，"
+                "而在「用结构邻近性给分歧分组」这个依据本身"))
+
+    out.append(("⚠️ 自然近邻准则与焦点分组的目标**正好相反**",
+                nat["k"] >= 4 and len(F.knn_foci(pd, views=pv, k=nat["k"])["foci"]) == 1,
+                f"它选 k={nat['k']}，而那个 k 上已经只剩 1 个焦点。"
+                "它的目标是「没有孤立点」（人人都有邻居），"
+                "焦点分组要的是「组之间别并」—— 两者相反"))
+
+    # 对照：在有断裂的材料上，新规则在**小 k** 下给出更细的分辨
+    from checks import realdata as RD
+    from adapters import scaffold as SC
+    dd = RD.corpus_dir()
+    if dd:
+        nodes = SC.load_corpus_dir(dd)
+        rv = [a.view for a in SC.split_views(nodes, split_by="source.kind")]
+        if len(rv) >= 2:
+            rd = D.analyse(rv)
+            o = len(F.foci(rd, radius=0, views=rv))
+            n1 = len(F.knn_foci(rd, views=rv, k=1)["foci"])
+            out.append(("对照：材料有断裂时，新规则在小 k 下更细（不是一无所长）",
+                        n1 >= o,
+                        f"真实语料：旧规则 {o} 个焦点；新规则 k=1 → {n1} 个，"
+                        f"k=2 → {len(F.knn_foci(rd, views=rv, k=2)['foci'])} 个"))
+
+    # ① 既有行为不变：radius=0 与旧签名一致
+    pv2, _ = POS.build()
+    pd2 = D.analyse(pv2)
+    n_old = len(F.foci(pd2))
+    n_zero = len(F.foci(pd2, radius=0, views=pv2))
     out.append(("radius=0 与旧签名的结果一致（默认不改变任何东西）",
                 n_old == n_zero, f"foci()={n_old}、foci(radius=0)={n_zero}"))
 
@@ -160,13 +211,30 @@ def report() -> list:
         cal = F.calibrate(div, views)
         rows.append((name, f"曲线 {cal['curve']}  r*={cal['r_star']}"))
         rows.append(("  └ 判定", cal["note"]))
-    rows.append(("结论",
+    rows.append(("结论（旧规则：距离 ≤ r）",
                  "半径只在**中间地带**有用：并集图连通、且分歧稀疏到 "
                  "radius=0 还能给出 >1 个焦点。两个现成语料都不在那里 —— "
                  "一个是并得太早，一个是永远并不上。**都不是实现 bug。**"))
-    rows.append(("校准怎么发生",
-                 "r* 由结构算出，数据一多自动重算；`curve` 每次都报出来，"
-                 "所以「换了值」永远看得见（`synthesis.provenance.focus_radius`）"))
+    # ── 新合并规则（kNN 分量）+ 自然近邻 ──────────────────────────────
+    from generators import positions as POS
+    from analysis import divergence as D
+    pv, _i = POS.build()
+    pd = D.analyse(pv)
+    recs = [r for t in ("refinement", "contradiction", "alternative", "omission")
+            for r in pd[t]]
+    nat = F.natural_k(recs, F.structure_graph(pv))
+    rows.append(("新合并规则（kNN 分量，k=1,2,3,5,8）",
+                 f"{[len(F.knn_foci(pd, views=pv, k=k)['foci']) for k in (1, 2, 3, 5, 8)]}"
+                 " —— **也是 1，一个不落**"))
+    rows.append(("自然近邻",
+                 f"轨迹 {nat['trace'][:6]} → k={nat['k']}。"
+                 "⚠️ 它选的 k 恰好是「全都并上了」的那个 —— "
+                 "**它的目标（没有孤立点）与焦点分组（组间别并）相反**"))
+    rows.append(("⚠️ 设计级结论",
+                 "立场材料上**换尺度不行、换合并规则也不行**。所以毛病不在尺度、"
+                 "也不在合并规则，而在「用**结构邻近性**给分歧分组」这个依据本身 —— "
+                 "真正的多视图分歧在共享空间上到处都在，"
+                 "按邻近性分组必然并成一团。**需要换分组依据（按特征而非按位置）。**"))
     return rows
 
 
