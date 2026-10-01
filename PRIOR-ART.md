@@ -636,6 +636,103 @@ DCE 现在卡的那两处（焦点、指标），不是没人解决过，是**�
 
 ---
 
+## 第三批：五个难题的候选解法（**已核到两条，其余仍未核到**）
+
+前面两批是把「别处有什么成熟思想」摸清。这一批是**对着本仓库的五个具体难题**去找。
+结果：**核到两条**，而且两条都比预期更贴。
+
+### 难题一：共识太脆 → **Krippendorff 的 alpha**（✅ 核到正文，对比极有信息量）
+
+现在的共识是合取（出现在**全部**视图里），一有视图漏一条就没了。
+
+**评分者间信度这个领域整片都在处理「评分有缺失」**，而核到的东西给出一条很硬的对比：
+[CRAN `irr` 参考手册](https://cran.r-project.org/web/packages/irr/refman/irr.html)里，
+**每一个其他系数**的 Details 段都写着同一句话：
+
+> **Missing data are omitted in a listwise way.**
+
+（Cohen's kappa、Fleiss' kappa、ICC、Finn、Kendall's W、Bhapkar、Stuart-Maxwell、
+meancor、meanrho、Robinson's A、Maxwell、relInterIntra —— 逐条都写了。）
+
+**而 `kripp.alpha` 是唯一的例外**：它的说明里**没有这句话**，
+而它的示例数据**直接带 `NA`**：
+
+```r
+nmm <- matrix(c(1,1,NA,1,2,2,3,2,3,3,3,3,3,3,3,3,2,2,2,2,1,2,3,4,4,4,4,4,
+                1,1,2,1,2,2,2,2,NA,5,5,5,NA,NA,1,1,NA,NA,3,NA), nrow=4)
+kripp.alpha(nmm)          # 默认 nominal
+kripp.alpha(nmm,"ordinal")
+```
+
+它返回的字段里有 **`cm`（concordance/discordance matrix，算 alpha 用的那张表）**
+与 `nmatchval`（匹配计数）—— **它不靠「把有缺失的对象整条删掉」，而是在「对子」上建表。**
+
+```r
+kripp.alpha(x, method=c("nominal","ordinal","interval","ratio"))
+$value       alpha 的值
+$cm          **一致性/不一致性矩阵**（计算所用的那张表）
+$stat.name   "nil" —— **没有检验统计量**（Krippendorff 1980）
+```
+
+**对 DCE 的意义**（我的判断，不是引文）：
+
+    合取  =  listwise deletion 的**极端**（一条都不许缺）
+    α     =  在「对子」上建一致性表，**从而容忍缺失**，且没有阈值、没有检验统计量
+
+这正好是 P3 要的东西：**一个不靠阈值、能容忍缺失、且不退化成空集的共识定义。**
+⚠️ 但**它是不是一个「集合」还需要设计**：α 输出的是一个标量，而 DCE 需要知道
+**哪些结构是共识**。可能的桥是 `cm` 那张表本身 —— 但那要先想清判据再动手。
+
+### 难题四：两方对立接不上 → **Dung 抽象论辩框架**（✅ 核到确切定义）
+
+⚠️ **这条比我预期的更贴。** 核到的正文是
+[Hackage `Dung-1.1` 的模块文档](https://hackage-content-origin.haskell.org/package/Dung-1.1/docs/Language-Dung-AF.html)：
+
+```haskell
+data DungAF arg = AF [arg] [(arg, arg)]
+-- "a set of arguments ... and an **attack relation on these arguments**"
+```
+
+**攻击关系是「论证对论证」** —— 不是「论证对结论」。这正是难题四的症结所在：
+Arena 里「同一结论被一条证据支持、被另一条反对」，在 Dung 里**天然可表达**，
+因为攻击挂在**论证**之间，不需要主客体都相同。
+
+核到的核心定义（逐条来自正文）：
+
+    conflictFree   args 内部无攻击
+    f              **特征函数**：给出「相对 args 可接受」的那些论证
+    admissible     args 是 conflictFree **且** args ⊆ f(af, args)
+    grounded       在**空集**上迭代 f 到不动点 → **唯一**（`groundedF`）
+    complete       没有 illegallyIn / illegallyOut / illegallyUndec 的标注
+    preferred      inLab 在**集合包含下极大**（`isPreferredExt`）
+    stable         `undecLab labs == []`（`isStable`）
+    semiStable     undecLab 在集合包含下**极小**（`isSemiStable`）
+
+    三值标注 Status = In | Out | **Undecided**
+    illegallyIn   标了 In，但不是**所有**攻击者都是 Out
+    illegallyOut  标了 Out，但**没有**一个 In 的攻击者
+    illegallyUndec 标了 Undecided，但「攻击者全是 Out」**或**「有 In 的攻击者」
+
+**对 DCE 的第三点意义**：那个 **`Undecided`** 三值 ——
+它与本仓库的 `omission`、以及粗糙集的**边界域**是同一个位置的东西：
+「不能确定在里面，也不能确定在外面」。**三个不同领域各给了一个第三值。**
+
+### ⚠️ 还没核到的（这一批的缺口）
+
+| 难题 | 候选 | 状态 |
+|---|---|---|
+| 三 · 缺失表示会爆炸 | 对比集挖掘 / emerging patterns | ❌ 只搜到 PDF（JMLR 综述） |
+| 五 · 按邻近性分组会塌 | **双聚类 / 共聚类** | ❌ **`biclust` 的 refman 返回 404**（换 URL 再试） |
+| 二 · 压缩指标没意义 | MDL 两段式编码 / 率失真 | ❌ 未试 |
+| — | 系统发生学的 strict / majority-rule consensus | ❌ 未试 |
+
+**难题五尤其要紧**，因为它是刚刚被量出来的**活阻塞点**：
+立场材料上换尺度不行、换合并规则也不行，所以焦点机制需要**换分组依据**
+（按特征而非按位置）—— 而双聚类正是那个依据的现成候选。**它还没核到。**
+
+---
+
+
 ## 附：第二轮检索的其余收获（都有正文与 URL）
 
 这些是检索过程中撞见的、与「多视图差异度量 / 无阈值分组 / 显著性检验」相关的成熟条目。
