@@ -1272,6 +1272,133 @@ def test_stability_has_no_threshold_free_criterion():
         "空外延那个概念该被拒绝（见上一条测试）"
 
 
+def test_nullmodel_assertions_pass():
+    """零模型的全部检查，含**校准检验**（检验这个检验本身）。"""
+    from checks import nullmodel
+    for title, ok, detail in nullmodel.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_swap_preserves_marginals_exactly():
+    """度保持随机化必须**逐位**保持行和与列和，且**真的动了**。
+
+    「保持边际」与「真的随机化」缺一不可：只保持不动 = 零模型是恒等映射，
+    那它的零分布就是观测本身；只动不保持 = 那不是一个保持边际的零模型。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    from analysis import nullmodel as N
+    views, _i = POS.build()
+    ctx = K.context(F._all_records(D.analyse(views)), views)
+    rows0, cols0 = N.marginal_rows(ctx), N.marginal_cols(ctx)
+    n_swap = 10 * sum(rows0)
+    before = {i: frozenset(s) for i, s in ctx["attrs"].items()}
+    rand = N.swap_randomize(ctx, n_swap, 5)
+    rctx = {"attrs": rand["attrs"], "all_attrs": rand["all_attrs"],
+            "n_objects": ctx["n_objects"], "n_attrs": ctx["n_attrs"]}
+    assert N.marginal_rows(rctx) == rows0, "行和变了"
+    assert N.marginal_cols(rctx) == cols0, "列和变了"
+    moved = sum(1 for i in rows0 if rand["attrs"][i] != ctx["attrs"][i])
+    assert moved > 0, "一次都没动 —— 零模型成了恒等映射"
+    # 绝不改动入参
+    assert {i: frozenset(s) for i, s in ctx["attrs"].items()} == before
+
+
+def test_sep_sum_is_a_theorem_not_a_measurement():
+    """**`Σ_C Sep(C) ≡ 对象数` 是定理，所以 `sum_sep` 不可检验。**
+
+    证明：固定对象 o，`F_o = {C : o ∈ Ext(C)}` 在格序下上闭，而它的极小元唯一 ——
+    就是 `(o'', o')`（任何含 o 的概念 `(A,B)` 有 `B ⊆ o'`，故 `A = B' ⊇ o''`）。
+    而 `Σ_C Sep(C)` 对每个 o 数的正是 `F_o` 的极小元个数 = 1。▮
+
+    ⚠️ 这条是零模型顺手抓出来的：那个量在**任何**零分布里都一动不动，
+    因为它是定理。**一个恒定的统计量不是测量值。**
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    from analysis import nullmodel as N
+    views, _i = POS.build()
+    recs = F._all_records(D.analyse(views))
+    ctx = K.context(recs, views)
+    assert N.statistics(ctx)["sum_sep"] == ctx["n_objects"]
+    # 而且在零分布里确实恒定
+    dist = N.null_distribution(ctx, R=20, seed=1)
+    assert len({n["sum_sep"] for n in dist["nulls"]}) == 1, \
+        "sum_sep 在零分布里变了 —— 那它就不是定理，本条要重写"
+    assert N.is_constant(dist["nulls"], "sum_sep")
+
+
+def test_constant_statistics_get_no_pvalue():
+    """零分布里恒定的量**不给 p 值** —— 给它 `p = 1/(1+R)` 是谎话。
+
+    那在说「没有随机化更极端」，而真相是「这个量根本没有随机变化」。
+    """
+    from checks import realdata as RD
+    from adapters import scaffold as SC
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    from analysis import nullmodel as N
+    dd = RD.corpus_dir()
+    if dd is None:
+        print("    [跳过] 真实语料不在")
+        return
+    nodes = SC.load_corpus_dir(dd)
+    views = [a.view for a in SC.split_views(nodes, split_by="source.kind")]
+    if len(views) < 2:
+        print("    [跳过] 切不出多视图")
+        return
+    ctx = K.context(F._all_records(D.analyse(views)), views)
+    res = N.compare(ctx, R=50, seed=3)
+    q = res["stats"]["useful_layers"]
+    assert "status" in q, f"恒定量却给了 p 值：{q}"
+    assert res["stats"]["sum_sep"]["status"].startswith("定理")
+
+
+def test_nullmodel_calibration_and_its_two_failure_modes():
+    """**校准检验：这个检验在自己人身上不许报显著。**
+
+    拿零模型自己抽出的背景当「观测」，`p < 0.05` 的比例要接近 0.05。
+
+    ⚠️ 这条抓到的真错，我**归因错了两次**：
+      第一次以为原因是「只报单方向」；
+      改的时候又**同时**把 `>` 换成了 `>=`，于是把功劳记给了方向。
+      四个组合各跑一遍才看清 —— **两件事都要**：
+
+          不含并列(高)/不含并列(低)   30/30   误报
+          不含并列(高)/含并列(低)     13/30   误报
+          含并列(高)/不含并列(低)     17/30   误报
+          **含并列(高)/含并列(低)      0/30    校准**
+
+    原因：零分布 `{1: 70, 2: 29}` 并列严重；不含并列时低端与高端**都被判「极端」**，
+    因为并列被当成了「不在分布里」。
+
+    而 `含并列 + 只报单方向` 是**另一种**失败：不误报，但**没有检验力**。
+    **「不误报」与「有检验力」是两件事** —— 一个永远返回「不显著」的检验，
+    校准得完美。
+    """
+    from checks import nullmodel as CN
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    views, _i = POS.build()
+    ctx = K.context(F._all_records(D.analyse(views)), views)
+    key = "max_sep"
+    good = CN._calibration(ctx, key)
+    assert good["tail"] > 0.01, f"正确做法也不校准了：{good}"
+    for kw in (dict(ge=False, le=False), dict(ge=False, le=True),
+               dict(ge=True, le=False)):
+        c = CN._calibration(ctx, key, **kw)
+        assert c["tail"] <= 0.01, f"{kw} 竟然校准了 —— 结论要更新：{c}"
+    weak = CN._calibration(ctx, key, ge=True, le=True, two_directions=False)
+    assert weak["n_below"] == 0, f"这一支本该没有检验力：{weak}"
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation
