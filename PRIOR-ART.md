@@ -717,18 +717,71 @@ Arena 里「同一结论被一条证据支持、被另一条反对」，在 Dung
 它与本仓库的 `omission`、以及粗糙集的**边界域**是同一个位置的东西：
 「不能确定在里面，也不能确定在外面」。**三个不同领域各给了一个第三值。**
 
-### ⚠️ 还没核到的（这一批的缺口）
+### 难题五：按邻近性分组会塌 → **双聚类 / 共聚类**（✅ 核到正文，这一条最关键）
+
+这是**刚被量出来的活阻塞点**：立场材料上换尺度不行、换合并规则也不行，
+所以焦点机制需要**换分组依据**。而双聚类正是那个依据。
+
+核到的正文是 [scikit-learn 2.4 Biclustering](https://scikit-learn.org/stable/modules/biclustering.html)：
+
+> Biclustering algorithms **simultaneously cluster rows and columns** of a data matrix.
+> These clusters of rows and columns are known as **biclusters**.
+> Each determines a **submatrix** of the original data matrix with some desired properties.
+
+**为什么它正好对得上**（我的判断）：双聚类**根本不用图连通性** ——
+它聚的是**矩阵的行与列**。对 DCE 就是「分歧记录 × 特征」矩阵：
+
+    行 = 分歧记录
+    列 = 特征（关系种类、锚点是 from 还是 to、涉及哪几个视图 ……）
+    一个「双簇」= 一批记录 × 一批特征 → **就一个焦点**
+
+**没有链接，就没有传递闭包，所以不可能塌。** 这正是当前那个负面结论的解药。
+
+核到的另外几条：
+
+    **别名**（同一件事在不同领域的名字）：co-clustering、two-mode clustering、
+           two-way clustering、block clustering、coupled two-way clustering
+    **双簇的常见类型**：常值 / 常行 / 常列；异常高或低的值；**低方差的子矩阵**；行或列相关
+    **两种结构**：
+        block diagonal   每行每列**恰好属于一个**双簇（= 一个划分）
+        **checkerboard** 每行属于**所有**列簇，每列属于所有行簇
+    **谱共聚类**：把矩阵当**二分图**（行与列是两侧顶点，矩阵元素是边），
+           逼近**归一化割**以找稠密子图（Dhillon 2001）
+           `A_n = R^{-1/2} A C^{-1/2}` → SVD → 取从第二个起的 ℓ = ⌈log₂ k⌉ 个奇异向量
+           → 组成 Z = [[R^{-1/2}U], [C^{-1/2}V]] → 对 Z 的行做 k-means
+    **对数归一化**：`K_ij = L_ij − L̄_i· − L̄_·j + L̄_··`，其中 `L = log A`
+    **谱双聚类**：假设隐藏的棋盘结构；把奇异向量按「能被**分段常值**向量
+           逼近得多好」排序，用一维 k-means + 欧氏距离打分，取最好的 q 个（Kluger 2003）
+           ⚠️ **这一步是不带阈值的「选几个分量」** —— 靠拟合优度，不靠拍数
+    **评价**：Jaccard `J(A,B) = |A∩B| / (|A|+|B|−|A∩B|)`；
+           `consensus_score`（Hochreiter 2010）一对一最优匹配（`linear_sum_assignment`）
+           之后除以较大那个集合的大小
+
+### ⚠️ 两个必须记下来的点
+
+**一、`checkerboard` 结构暗示 DCE 的焦点可以不是划分。**
+现在焦点是**划分**（每条记录恰好一个焦点，block diagonal）。
+而 checkerboard 允许**一条记录属于多个焦点** —— 从立场材料看那是更贴切的：
+一条矛盾记录同时是某个精炼故事的一部分，是完全合理的。
+**现在「焦点是划分」这个前提，DCE 从没论证过。**
+
+**二、scikit-learn 明说双聚类**没有**内部评价指标**：
+
+> Internal measures, such as cluster stability, rely only on the data and the result
+> themselves. **Currently there are no internal bicluster measures in scikit-learn.**
+
+也就是说：**能不能在无真值的情况下判断一组双簇好不好，在那边也是开着的。**
+所以用双聚类解 P1 时，DCE 得**自带判据** —— 而那正是本仓库那条规矩
+（先写判据）该起作用的地方。
+
+### ⚠️ 还没核到的（这一批剩下的缺口）
 
 | 难题 | 候选 | 状态 |
 |---|---|---|
-| 三 · 缺失表示会爆炸 | 对比集挖掘 / emerging patterns | ❌ 只搜到 PDF（JMLR 综述） |
-| 五 · 按邻近性分组会塌 | **双聚类 / 共聚类** | ❌ **`biclust` 的 refman 返回 404**（换 URL 再试） |
-| 二 · 压缩指标没意义 | MDL 两段式编码 / 率失真 | ❌ 未试 |
-| — | 系统发生学的 strict / majority-rule consensus | ❌ 未试 |
-
-**难题五尤其要紧**，因为它是刚刚被量出来的**活阻塞点**：
-立场材料上换尺度不行、换合并规则也不行，所以焦点机制需要**换分组依据**
-（按特征而非按位置）—— 而双聚类正是那个依据的现成候选。**它还没核到。**
+| 三 · 缺失表示会爆炸 | 对比集挖掘 / emerging patterns / interestingness measures | ❌ 只搜到 PDF（JMLR 综述）；`biclust` 的 refman 也 404 |
+| 二 · 压缩指标没意义 | MDL 两段式编码 / 率失真 / 信息瓶颈 | ❌ 未试 |
+| — | 系统发生学的 strict / majority-rule / semi-strict consensus | ❌ 未试 |
+| — | 生态学的 rarefaction（稀释） | ❌ 未试 |
 
 ---
 
