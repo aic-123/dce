@@ -1399,6 +1399,117 @@ def test_nullmodel_calibration_and_its_two_failure_modes():
     assert weak["n_below"] == 0, f"这一支本该没有检验力：{weak}"
 
 
+def test_consensus_assertions_pass():
+    """观点群共识的全部检查。"""
+    from checks import consensus
+    for title, ok, detail in consensus.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_consensus_groups_degenerate_to_conjunction():
+    """**合取是观点群共识在「每个群只有一个视图」时的退化情形。**
+
+    `groups=None` 必须与加入参数之前**逐位相同** —— 否则就是偷偷改了行为。
+    """
+    from generators import positions as POS
+    from analysis import consensus as C
+    views, _i = POS.build()
+    base = C.consensus(views)
+    assert base == C.consensus(views, C.groups_singleton(views))
+    assert len(base) == 7, f"立场材料共识数变了：{len(base)}"
+
+
+def test_consensus_group_partition_is_validated_not_patched():
+    """群划分不合法就**报错**，不悄悄补齐。
+
+    ⚠️ 悄悄补一个群会改变共识的含义，而产物看起来一样。
+    四种不合法各有各的话要说：重叠 / 漏掉 / 多出 / 空群 / 没有群。
+    """
+    from generators import positions as POS
+    from analysis import consensus as C
+    views, _i = POS.build()
+    for g in ([frozenset({"P1", "P2"}), frozenset({"P2", "P3"})],
+              [frozenset({"P1"}), frozenset({"P2"})],
+              [frozenset({"P1", "P2", "P3", "P9"})],
+              [frozenset({"P1", "P2", "P3"}), frozenset()],
+              []):
+        try:
+            C.consensus(views, g)
+        except C.ConsensusError:
+            continue
+        raise AssertionError(f"不合法却没报错：{g}")
+
+
+def test_consensus_group_mechanism_actually_works():
+    """⚠️ **机制得在某个地方真的能工作。**
+
+    两份现成材料都**不触发**它：立场材料上没有任何单元的 present 恰好是
+    `(P2, P3)`（`P1 ⊊ P3` 成组，但没东西可救）；真实语料那四片是**同一个
+    知识库的切面**，正确的分法是一个群 → 共识扩到全体（退化，被标出来）。
+
+    **一个从没被触发过的机制与一个坏掉的机制，在输出上长得一样。**
+    所以这里造一个把它逼出来的材料：
+
+        A = {x}    B = {x, y}    C = {w, y}
+        A ⊊ B → 群 {A, B}；C 与 A、B 都不可比 → 自成一群
+        单元 y 只在 B 与 C 里：
+            合取    y 缺在 A 里        → 不是共识
+            观点群  {A,B} 由 B 覆盖 ✓
+                    {C}   由 C 覆盖 ✓  → **是共识**
+    """
+    from analysis import consensus as C
+    from core import view as V
+
+    def mk(vid, nodes):
+        return V.make_view(view_id=vid, source_ref=f"x://{vid}",
+                           source_kind="experiment", nodes=sorted(nodes),
+                           edges=[])
+    vs = [mk("A", ["x"]), mk("B", ["x", "y"]), mk("C", ["w", "y"])]
+    g = C.groups_from_refinement(vs)
+    assert g is not None and len(g) == 2, f"群划分不对：{g}"
+    assert not any(r["unit"]["key"] == "y" for r in C.consensus(vs)), \
+        "合取下 y 不该是共识"
+    hit = [r for r in C.consensus(vs, g) if r["unit"]["key"] == "y"]
+    assert hit, "观点群下 y 该是共识 —— 机制没工作"
+    assert hit[0]["covering"] == [["B"], ["C"]], hit[0]["covering"]
+
+
+def test_consensus_degeneracy_is_flagged_not_silent():
+    """群只有一个时，共识 ≡「至少一个视图含它」→ **全体单元都是共识**。
+
+    这句话**没有信息**，必须标出来，不能静默接受。
+    """
+    from generators import positions as POS
+    from analysis import consensus as C
+    views, _i = POS.build()
+    one = [frozenset(v["id"] for v in views)]
+    assert len(C.consensus(views, one)) == len(C.universe(views))
+    rows = C.consensus_curve(views)
+    assert rows["singleton"]["degenerate"] is False
+    assert C.consensus_curve(views)["refinement"]["n_groups"] >= 1
+
+
+def test_refinement_groups_are_transitive_and_none_when_absent():
+    """精炼关系取**传递闭包**；没有关系时返回 `None`。
+
+    ⚠️「没有关系」与「有关系但恰好都是单的」是**两件事**，不能混 ——
+    后者用一组单元素群表示，前者必须是 `None`。
+    """
+    from analysis import consensus as C
+    from core import view as V
+
+    def mk(vid, nodes):
+        return V.make_view(view_id=vid, source_ref=f"x://{vid}",
+                           source_kind="experiment", nodes=sorted(nodes),
+                           edges=[])
+    chain = [mk("A", ["x"]), mk("B", ["x", "y"]), mk("C", ["x", "y", "z"])]
+    g = C.groups_from_refinement(chain)
+    assert g is not None and len(g) == 1, f"链条上该并成一个群：{g}"
+    assert set().union(*g) == {"A", "B", "C"}
+    disjoint = [mk("A", ["x"]), mk("B", ["p"]), mk("C", ["q"])]
+    assert C.groups_from_refinement(disjoint) is None
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation
