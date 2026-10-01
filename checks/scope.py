@@ -37,7 +37,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 
 # §十七 规定的目录：这六个包 + 顶层 __init__。
-LAYOUT = {"core", "analysis", "metrics", "checks", "generators", "tests"}
+LAYOUT = {"core", "analysis", "metrics", "checks", "generators", "tests", "adapters"}
 
 # 每个包**恰好**该有的模块（§十七 逐个写死的那几个）。
 EXPECTED = {
@@ -51,7 +51,16 @@ EXPECTED = {
     # 可达率只有 38%、形状覆盖近乎为零。**一个点上的结论和一个扫描过的结论，
     # 在报告里长得一样。**
     "checks": {"identity", "interference", "reconstruction", "ablation",
-               "__init__", "__main__", "scope", "corpus"},
+               "__init__", "__main__", "scope", "corpus",
+               # ⚠️ `boundary` 也是**放进去时才解释的**：
+               # 「核心不能被上游结构带跑」是一条**方向性**的约束，而方向一旦反过来
+               # 不会让任何测试变红 —— DCE 只会慢慢变成 arena 的一次重新实现。
+               # 所以它需要一条专门盯方向的检查。
+               "boundary"},
+    # ⚠️ `adapters` 是 §十八 要求的边界层。它单列成一个顶层包，
+    # **就是那条方向约束的结构形式**：核心不许 import 这一层，
+    # 而 `checks/boundary.py` 把这条钉成可执行检查。
+    "adapters": {"__init__", "scaffold", "arena"},
     # ⚠️ `topology` 是**放进去时才解释的**（这条检查的作用正是逼我解释一句）：
     # 语料库的「骨架长什么样」与「视图怎么构造并植入」是两件事，
     # 混在一个 700 行的文件里以后没人分得清改了哪个。

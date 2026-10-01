@@ -67,13 +67,69 @@ C4_KINDS = ("supports", "contradicts", "qualifies", "assumes", "explains", "chal
 # debate.py 的因果两端。
 CAUSAL_KINDS = ("causal_premise", "causal_conclusion")
 
+# 本层**自己加的**种类（上游没有）。单列出来，好让「本层加的东西」永远看得见。
+DCE_DECLARED_KINDS = ("dce_untyped",)
+
 # 词表的并集 —— **封闭集合**，不认表外的种类。
 # 表外出现时报错而不是放过：放过会让「关系种类」这个维度慢慢退化成自由文本。
-KNOWN_KINDS = tuple(sorted(set(C3_KINDS) | set(C4_KINDS) | set(CAUSAL_KINDS)))
+KNOWN_KINDS = tuple(sorted(set(C3_KINDS) | set(C4_KINDS) | set(CAUSAL_KINDS)
+                           | set(DCE_DECLARED_KINDS)))
 
-# Scaffold 的 `relations` 不带种类，adapter 只能映射到这一个声明出来的占位种类。
-# 它是**声明的**，不是默认的：用它的 adapter 必须在自己的声明里写明这一点。
-SCAFFOLD_UNTYPED = "related_to"     # 复用 §C3.2 里已有的 related_to，不新造词
+# ── ⚠️ 规格里写了 ≠ 产品真的会产生 ────────────────────────────────────
+#
+# 下面是 arena **产品代码真正会创建**的种类（`scaffold.py:87-118` 声明了 15 种，
+# 但 grep 全仓库，产品路径只会创建这 10 种）。
+#
+# 分这一刀的直接原因：本仓库的合成语料原先用
+#     KINDS = ("supports", "refines", "related_to")
+# 也就是**三条边里两条用的是产品代码从不产生的种类**。那意味着语料库在
+# 一个上游真实数据里不存在的形态上验证 DCE —— 而 `refines` 恰好是
+# 「精炼」这一类差异最容易被误认为的来源。
+#
+# 这不只是语料的问题，也是接口的问题：**`refines` / `related_to` / `derived_from`
+# 的 relation 从哪来？** 答案是上游没有。所以 adapter 必须**声明**它，
+# 而不是假装从 Scaffold 或 arena 读到了 —— 见 `adapters/`。
+ARENA_PRODUCT_KINDS = (
+    "assumes", "causal_conclusion", "causal_premise", "challenged_by",
+    "clustered_into", "contains", "contradicts", "explains", "qualifies", "supports",
+)
+
+# 规格里写了、但**没有任何产品代码路径会产生**的种类。
+# 它们不是非法值（`check_kind` 仍然认），但它们**不能**被当作「上游会给的输入」。
+SPEC_ONLY_KINDS = tuple(sorted(set(KNOWN_KINDS)
+                                - set(ARENA_PRODUCT_KINDS)
+                                - set(DCE_DECLARED_KINDS)))
+
+# Scaffold 的 `relations` 不带种类，adapter 只能映射到这一个**声明出来的**占位种类。
+#
+# ⚠️ 这里刻意**不**复用 `related_to`。上一版复用了，理由是「不新造词」——
+# 但 `related_to` 属于 `SPEC_ONLY_KINDS`，复用它等于把「DCE 自己声明的占位符」
+# 伪装成「上游给的一个种类」。占位符就该长得像占位符。
+SCAFFOLD_UNTYPED = "dce_untyped"
+
+
+class EdgeError(Exception):
+    """边不对。消息面向调用方。"""
+
+
+def is_product_kind(relation: str) -> bool:
+    """这个种类是不是 arena 产品代码**真的会创建**的。
+
+    用来把「上游会给的输入」与「本层自己声明的」分开 —— 混在一起，
+    就无法回答「DCE 的输入在真实数据里存在吗」。
+    """
+    return relation in ARENA_PRODUCT_KINDS
+
+
+def require_product_kind(relation: str) -> None:
+    """要求这个种类在上游产品路径里真的存在。合成语料与 adapter 应当过这一关。"""
+    if not is_product_kind(relation):
+        raise EdgeError(
+            f"关系种类 {relation!r} 在 arena 产品代码里不会被创建"
+            f"（它属于 SPEC_ONLY_KINDS={list(SPEC_ONLY_KINDS)}）。\n"
+            "合成语料与 adapter 只用产品真的会产生的种类 —— 否则测的是一个"
+            "上游不存在的形态。若确实要用它，必须显式声明它是本层加的。"
+        )
 
 # ── 互斥集：声明 ──────────────────────────────────────────────────────
 #

@@ -193,17 +193,85 @@ Test 3 的判据是「DCE 必须能够**分别**恢复它们」。**这句话只
 core/            view（结构化视图 + 规范化哈希）· node · edge（边身份 + 关系词表）· provenance
 analysis/        consensus（合取，不是比例）· divergence（四类，互斥）· focus · synthesis
 metrics/         coverage · compression
+adapters/        scaffold · arena（§十八 的边界层：单向翻译上游形状）
 checks/          identity · interference · reconstruction（Test 3）· ablation（§十六）
-                 scope（§二十）· corpus（反例扫描）
+                 scope（§二十）· corpus（反例扫描）· boundary（方向与保真）
 generators/      synthetic（带 ground truth 的语料）· topology（骨架形状）
-tests/           test_dce.py（34 条）· run_tests.py（不依赖 pytest 的入口）
+tests/           test_dce.py（41 条）· run_tests.py（不依赖 pytest 的入口）
 ```
 
 **§十七 规定的目录，一个包不多一个不少** —— 这条有可执行检查
 （`checks/scope.py` 盯模块清单）。加一个「曲率模块」或「记忆模块」进来，
 它一定表现为多出一个顶层模块，检查会当场报出来。
-`generators/topology.py` 与 `checks/corpus.py` 都是**放进去时才解释的**，
-解释写在 `checks/scope.py` 的 `EXPECTED` 里 —— 那条检查的作用正是逼我解释一句。
+`generators/topology.py`、`checks/corpus.py`、`checks/boundary.py`、`adapters/`
+都是**放进去时才解释的**，解释写在 `checks/scope.py` 的 `EXPECTED` 里 ——
+那条检查的作用正是逼我解释一句。
+
+---
+
+## §十八 的 adapter：单向翻译，核心不许依赖它
+
+上游（Scaffold / arena）各有自己的数据模型。`adapters/` 是它们与
+`Structured View` 之间的翻译层，存在的理由是：**翻译必须发生在一个明确的地方**，
+否则上游的字段会慢慢渗进 `core/`，DCE 就变成上游的一次重新实现，
+而 §十九 划的那条边界会在没人注意的时候消失。
+
+这条约束是**方向性**的，所以它需要一条专门盯方向的检查：
+
+```
+core/ analysis/ metrics/  不许 import adapters     ← checks/boundary.py 钉住
+上游形状 → Structured View   允许，且只发生在 adapters/
+```
+
+方向一旦反过来，**不会让任何测试变红** —— 所以必须有一条检查专门盯着它。
+
+### ⚠️ 设计稿 §十八 声明的六项接口，四项与实际不符
+
+| 设计稿声明 Scaffold 提供 | 实际 |
+|---|---|
+| Node | **有**（11 字段，`SPEC.md:38` 明文不得增删） |
+| Edge | **没有**。`relations` 是 `list[str]`，**无种类、无方向元数据** |
+| Situation | **没有**。`cues` 是情境索引，但没有 Situation 实体 |
+| Source | 只有字段，**没有实体**；且一篇节点只有**一个** source 槽位 |
+| Cue / Evidence Status | 有（就是 `cues` / `evidence_status`） |
+
+### ⚠️ 一条会改变结论的取舍
+
+**从 Scaffold 出来的视图不可能产生 `contradiction`。**
+
+矛盾的定义是「同一对端点上，两个视图给出**被声明为互斥**的两种 relation」。
+Scaffold 的关系没有种类，所以它的边全部落在本仓库**声明的**占位种类
+`dce_untyped` 上（不是从上游借的词 —— 上一版借了 `related_to`，
+而那个词属于「规格里有、产品代码从不产生」，借它等于把本层的占位符伪装成上游的输入）。
+
+于是同样一份差分算法，输入形状不同，**能回答的问题就不同** ——
+Scaffold 视图 `can_produce = (consensus, alternative, omission, refinement)`，
+arena 视图多一个 `contradiction`。这件事写在 adapter 的声明里，不留给读者去猜。
+
+### ⚠️ 一处**真实的接口错位**（已量出，未修）
+
+Arena 里「两方对立」长这样：
+
+```
+evid-0001 --supports----> claim-0001
+evid-0002 --contradicts-> claim-0001
+```
+
+**共享的是 `to`，不同的是 `from`。** 而 DCE 的矛盾判据要求 `(from, to)` 相同、
+只有 relation 互斥。于是这对在 DCE 里**一条矛盾都报不出来** ——
+实测报出矛盾 **0 条**、omission 3 条。
+
+**这是判据错位，不是实现 bug，而且我没有顺手去改 DCE 的核心定义** ——
+那正是「被上游结构带着跑」。三条可能的出路都还没走：
+
+1. 把 DCE 的 `contradiction` 从「同 `(from,to)`」放宽成「同 `to`、互斥 kind」
+   —— 那是改本层核心判据，需要设计稿点头
+2. 在 adapter 里 **reify**：把「对同一 claim 的两种对立态度」显式建成一个共享端点
+   —— 这是 adapter 的活
+3. 承认这形状在 MVP 范围外
+
+这个数字被钉成测试（`test_arena_disagreement_gap_is_measured_not_hidden`），
+所以**哪一天它变了，会当场被看见**。
 
 ---
 
@@ -247,11 +315,14 @@ arena 抄的，互斥集 `supports ⊥ contradicts ⊥ qualifies` 也是（依�
 
 | 项 | 状态 |
 |---|---|
-| 真实 LLM 视图 | **没接**。MVP 只用合成 ground truth（§十四 的要求）。§十八 的三个 adapter 里，只有 Scaffold 的节点模型是读过的；**Arena 的 Position/Claim 映射与 Nested 的 pointer 映射尚未落地** |
+| 真实 LLM 视图 | **没接**。MVP 只用合成 ground truth（§十四 的要求） |
+| 真实数据接入 | **只到 adapter 为止**。`adapters/scaffold.py` 与 `adapters/arena.py` 是**翻译函数**，输入是**最小声明形状**（不是 live DB、不是 arena 的 SQLite）。用真实数据跑通需要有人提供符合那份最小形状的导出 |
+| Nested 的映射 | **没做**。nested 是**派生层**（pointer / provenance），而 DCE 的 provenance 是它自己的输出 —— 两者是同一层的位置，不是输入输出关系。本仓库只借了它的**做法**（字段白名单、`「没有」与「有但坏」是两件事`、永不改入参），没有也不需要一个 nested adapter |
 | semantic alignment | **不做**，见上 |
 | embedding 相似度 | **没做**。用的是字符二元组 Dice 替代品，标得很清楚 |
-| 稀疏/长尾规模 | **没测**。反例扫描是 720 个配置、每个几十到几百个单元（整套 4 秒）。真实规模下 `flat` 口径的缺失记录会先出问题 —— 那是 O(视图 × 单元) |
-| 真实拓扑 | **用简化代替**。`topology.py` 的四种骨架（随机 / 森林 / 链 / 星）是 Scaffold 与 arena 真实结构（Topic→Position→Claim→Evidence、论证链）的**简化**，不是真形状 |
+| 稀疏/长尾规模 | **没测**。反例扫描是 720 个配置、每个几十到几百个单元（整套 6 秒）。真实规模下 `flat` 口径的缺失记录会先出问题 —— 那是 O(视图 × 单元) |
+| 真实拓扑 | **用简化代替**。`topology.py` 的四种骨架（随机 / 森林 / 链 / 星）是 Scaffold 与 arena 真实结构的**简化**，不是真形状 |
+| Arena 的两方对立 | **判据够不着**，已量出：报出矛盾 0 条。见上面「一处真实的接口错位」 |
 | `support` 之外的共识机制 | `§C7.1` 的「跨群共识」在 MVP 规模下**全程休眠**（没有观点群）。本仓库的合取是它在无群情形下的退化形式 |
 
 ---

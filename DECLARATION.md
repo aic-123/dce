@@ -298,26 +298,72 @@ Test 3 的原文是「植入 10 contradictions / 20 omissions / 10 refinements /
 
 | 上游 | 提供什么 | 本仓库用了什么 |
 |---|---|---|
-| **[Scaffold](https://github.com/aic-123/Scaffold)** | `Node` / `Edge` / `Situation` / `Cue` / `Source` / `Evidence Status` | 节点 id 的形状与前缀映射**照抄**（`schema/node.schema.yaml`）。⚠️ 它的 `relations` **不带关系种类**，所以 typed edge 得由 adapter 声明 |
-| **[arena](https://github.com/aic-123/arena)** | `Position` / `Claim` / `Argument` / `Evidence` / `Trace`；`relation.kind` | **关系词表与互斥集的出处**（`§C3.2` ∪ `§C4`）；`§C9` 十一条不变量；`§C7.1` 的单向性与「不许用热度」；`§T4.2` 的「B 类声明必须落成可执行的否证检查」 |
-| **[nested-traceable-discussion-graph](https://github.com/aic-123/nested-traceable-discussion-graph)** | `pointer` / `provenance` / `derived structure` | 三条做法：**字段白名单而不是长度阈值**（"那是阈值，会滑进要防的那一族"）、**「没有」与「有但坏」是两件事**、**永不改入参**（`attach()` 返回新字典） |
+| **[Scaffold](https://github.com/aic-123/Scaffold)** | `Node`（11 字段）/ `Cue` / `Source` / `Evidence Status` | 节点 id 的形状与前缀映射**照抄**（`schema/node.schema.yaml`）。⚠️ 它**没有 Edge 实体、没有 Situation**，`relations` 是 `list[str]` **不带种类也不带方向**，一篇节点只有**一个** source 槽位 —— 设计稿 §十八 声明的六项里有四项与实际不符，逐条更正见 `adapters/scaffold.py` 的模块 docstring |
+| **[arena](https://github.com/aic-123/arena)** | 类型化的 `relation.kind`、`§C9` 十一条不变量、`§C7.1` 的单向性与「不许用热度」、`§T4.2` 的「B 类声明必须落成可执行的否证检查」 | **关系词表与互斥集的出处**（`§C3.2` ∪ `§C4`）；`§C9` 十一条不变量；`adapters/arena.py` 按作者切视图并**丢掉**投票/修订/事件 |
+| **[nested-traceable-discussion-graph](https://github.com/aic-123/nested-traceable-discussion-graph)** | `pointer` / `provenance` / `derived structure` | 三条做法：**字段白名单而不是长度阈值**、**「没有」与「有但坏」是两件事**、**永不改入参**。⚠️ **没有也不需要 nested adapter** —— nested 是**派生层**，与 DCE 同层，不是 DCE 的输入来源 |
 
-**尚未落地的**：Arena 的 `Position/Claim → Structured View` 映射、
-Nested 的 `pointer → provenance` 映射。§十八 列了三个 adapter，
-本仓库只把 Scaffold 的节点模型读透并用上了。
+### 7.1 关系词表：规格里写了 ≠ 产品真的会产生
+
+这一轮接上了一处**自己早先发现、做 MVP 时没接上**的更正。arena 的
+`scaffold.py` 声明了 15 种关系种类，但 grep 全仓库，**产品代码只会创建 10 种**。
+`refines` / `related_to` / `derived_from` **没有任何产品路径会产生**。
+
+而本仓库的合成语料原先用的是
+
+    KINDS = ("supports", "refines", "related_to")
+
+—— **三条边里两条是产品从不产生的种类**。那等于在**上游真实数据里不存在的形态**上
+验证 DCE。而 `refines` 恰好又是「精炼」这一类差异最容易被误认为的来源。
+
+现在 `core/edge.py` 把词表分了三层，混在一起就无法回答
+「DCE 的输入在真实数据里存在吗」：
+
+    ARENA_PRODUCT_KINDS   10 种，产品真的会创建
+    SPEC_ONLY_KINDS       3 种（derived_from / refines / related_to），规格里有、产品没有
+    DCE_DECLARED_KINDS    1 种（dce_untyped），本层自己加的占位符
+
+`checks/boundary.py` 的「保真」那条盯着生成器与 adapter 不越界。
+
+顺带一处更正：`SCAFFOLD_UNTYPED` 上一版是 `"related_to"`，理由是「不新造词」——
+但 `related_to` 属于 `SPEC_ONLY_KINDS`，**借它等于把本层的占位符伪装成上游的输入**。
+现在它是 `"dce_untyped"`，占位符就长得像占位符。
+
+### 7.2 一处**真实的接口错位**，量出来了但没修
+
+Arena 里「两方对立」的形状是：
+
+    evid-0001 --supports----> claim-0001
+    evid-0002 --contradicts-> claim-0001
+
+**共享的是 `to`，不同的是 `from`。** 而 DCE 的矛盾判据是「同一对 `(from,to)` 上
+两种互斥的 relation」。于是这对在 DCE 里**一条矛盾都报不出来** ——
+实测 **0 条**，同一输入报出 omission 3 条。
+
+**我没有顺手去改 DCE 的核心定义**，因为那正是「被上游结构带着跑」：
+改判据是**本层**的决定，该由本层的理由驱动，不该由某个上游恰好长什么样驱动。
+
+三条出路都还没走，记在这里：
+
+1. 把 `contradiction` 从「同 `(from,to)`」放宽成「同 `to`、互斥 kind」—— 需设计稿点头
+2. 在 adapter 里 **reify**：把「对同一 claim 的两种对立态度」显式建成一个共享端点
+3. 承认这形状在 MVP 范围外
+
+这个数字被钉成测试（`test_arena_disagreement_gap_is_measured_not_hidden`）：
+**哪一天它变了，会当场被看见**，而不是悄悄溜过去。
 
 ---
 
 ## 八 · 复现
 
 ```bash
-python -m checks               # 29 条断言 + 四组度量（含反例扫描）
-python tests/run_tests.py      # 34 条测试（不需要 pytest）
+python -m checks               # 35 条断言 + 四组度量（含反例扫描）
+python tests/run_tests.py      # 41 条测试（不需要 pytest）
 
 # 单独跑
 python -m checks identity        # Test 1 / Test 2 + 焦点编号
 python -m checks interference    # Test 4（含 hash 判据）
 python -m checks scope           # §二十 排除项的可执行形式
+python -m checks boundary        # §十八 边界：方向 / 词汇 / 保真 / 防空转
 python -m checks reconstruction  # Test 3 恢复率（度量）
 python -m checks ablation        # §十六 三个基线（度量）
 python -m checks.corpus          # 反例扫描：720 个配置，每条结论撞一遍

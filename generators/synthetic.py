@@ -42,12 +42,17 @@ from __future__ import annotations
 
 from core import view as V
 
-KINDS = ("supports", "refines", "related_to")
-EXCLUSIVE = ("contradicts", "supports")
+# ⚠️ 关系种类只用 arena **产品代码真的会创建**的那 10 种里的。
+# 本模块原先自己写了一份 `("supports", "refines", "contains")` ——
+# 三条里两条是产品从不产生的（`SPEC_ONLY_KINDS`），也就是在验证一个
+# 上游不存在的形态。骨架那边的种类清单是同一份，直接用 `topology.KINDS`，
+# **不再各写一份**（判据写两遍就一定会漂，这个教训本仓库已经吃过一次）。
+from . import topology as _topo  # noqa: E402
+
+KINDS = _topo.KINDS
 
 # 造标签用的词根。只为让相似度基线有东西可比（见 `_labels`）。
-VOCAB = ("alpha", "beta", "gamma", "delta", "epsilon",
-         "zeta", "eta", "theta", "iota", "kappa")
+VOCAB = _topo.VOCAB
 
 # 能种矛盾的关系种类：**必须在声明的互斥集里有对应**（见 core/edge.py 的 EXCLUSIVE_PAIRS）。
 # 从 edge 模块推出来，不手写 —— 手写就会与声明漂开，而漂开的表现是「DCE 漏报」，
@@ -213,7 +218,7 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
                 b = nodes[st % len(nodes)]
                 if a == b:
                     b = nodes[(nodes.index(a) + 1) % len(nodes)]
-                mine.append((a, b, "related_to"))
+                mine.append((a, b, "contains"))
         priv[vi] = mine
 
     raw = {vi: (list(core) + list(priv[vi])) for vi in vids}
@@ -325,7 +330,7 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
             b = nodes[st % len(nodes)]
             if a == b:
                 continue
-            cand = (a, b, "related_to")
+            cand = (a, b, "contains")
             if cand not in raw[fine] and cand not in extra:
                 extra.append(cand)
         raw[fine] = sorted(set(list(raw[coarse]) + list(raw[fine]) + extra))
@@ -381,7 +386,7 @@ def make(base: dict, spec: dict, seed: int = 20261002) -> tuple:
         chunk = spare[i::max(1, n_disjoint)][:4]
         if len(chunk) < 2:
             continue
-        es = [(chunk[j], chunk[j + 1], "related_to") for j in range(len(chunk) - 1)]
+        es = [(chunk[j], chunk[j + 1], "contains") for j in range(len(chunk) - 1)]
         shape_views.append(("D%d" % (i + 1), sorted(chunk), es))
         shape_truth["disjoint"].append("D%d" % (i + 1))
     for i in range(n_equal):

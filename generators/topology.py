@@ -38,7 +38,15 @@ from __future__ import annotations
 VOCAB = ("alpha", "beta", "gamma", "delta", "epsilon",
          "zeta", "eta", "theta", "iota", "kappa")
 
-KINDS = ("supports", "refines", "related_to")
+# ⚠️ 合成语料只用 arena **产品代码真的会创建**的关系种类。
+# 上一版是 `("supports", "refines", "related_to")` —— 三条边里两条用的种类
+# 在上游产品路径里**从不产生**（见 `core/edge.py` 的 `SPEC_ONLY_KINDS`）。
+# 那等于在一个真实数据里不存在的形态上验证 DCE。
+#
+# 这里取的是产品种类里**结构上够中性**的一批：`contains` 是 Scaffold 的
+# 层级关系，`supports` / `qualifies` / `explains` / `assumes` 是 §C4 那张表里的，
+# 和 `contradicts` 有声明过的互斥关系 —— 于是「种矛盾」有足够多的落脚点。
+KINDS = ("contains", "supports", "qualifies", "explains", "assumes", "challenged_by")
 
 
 def _xs(state: int) -> int:

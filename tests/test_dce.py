@@ -323,6 +323,123 @@ def test_recall_gap_is_explained_by_reclassification():
     assert dropped, "没有任何一类的 strict 召回掉落 —— 交叠没被真正测到，检查是空转的"
 
 
+# ── §十八 adapter 与边界 ────────────────────────────────────────────
+
+def test_adapters_boundary_assertions_pass():
+    """「核心不能被上游结构带跑」的可执行形式。"""
+    from checks import boundary
+    for title, ok, detail in boundary.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_core_never_imports_adapters():
+    """方向：核心不许依赖边界层。方向一旦反过来，不会让任何测试变红 ——
+    DCE 只会慢慢变成 arena 的一次重新实现。"""
+    from checks import boundary
+    ok, detail = boundary.check_core_does_not_import_adapters()
+    assert ok, detail
+
+
+def test_scaffold_view_cannot_contradict():
+    """Scaffold 的关系没有种类 → 从它出来的视图**不可能产生矛盾**。
+    这是形状的事实，而 adapter 必须把它声明出来，不能留给读者去猜。"""
+    from adapters import scaffold as SC
+    a = SC.to_view("SC", [{"id": "con-0001", "relations": ["judge-0001"]},
+                          {"id": "judge-0001", "relations": []}])
+    assert "contradiction" not in a.can_produce, \
+        f"Scaffold 视图声称能产生矛盾：{a.can_produce}"
+    assert any("没有种类" in x for x in a.losses), "「关系没有种类」这条损失没被记账"
+
+
+def test_arena_view_drops_interaction_layer():
+    """arena adapter 必须丢掉投票与修订，并逐条记账。"""
+    from adapters import arena as A
+    art = [{"id": "claim-0001", "type": "claim", "author": "u1",
+            "state": "active", "created_at": "2026"},
+           {"id": "vote-0001", "type": "vote", "author": "u2"}]
+    rels = [{"kind": "supports", "from_id": "claim-0001", "to_id": "claim-0001",
+             "seq": 3}]
+    avs = A.to_views(art, rels)
+    assert avs, "没产出任何视图"
+    joined = " ".join(x for a in avs for x in a.losses)
+    assert "vote" in joined, "丢掉投票这件事没被记账"
+    # 结构里不许留下交互层字段
+    import json
+    blob = json.dumps([a.view for a in avs], ensure_ascii=False)
+    for bad in ("vote", "revision", "seq", "state", "created_at", "superseded_by"):
+        assert f'"{bad}"' not in blob, f"视图里残留了交互层字段 {bad}"
+
+
+def test_adapter_can_produce_follows_the_data():
+    """`can_produce` 必须跟着**实际吐出的种类**走，不能写死。
+
+    ⚠️ 判据是「**词表里**有没有哪一种与它互斥」，不是「这组种类内部有没有互斥的一对」——
+    因为**矛盾是跨视图的**：一个视图说 `supports`、另一个说 `contradicts`，
+    单看前一个视图当然看不到互斥对。
+
+    （我第一版把这条判据写成了后者，于是「只有 supports 的视图不能产生矛盾」
+    被判成正确；后来发现那与矛盾的定义冲突。同一个错在
+    `adapters.check_can_produce` 里也犯过一次 —— 写测试又犯一次。）
+    """
+    from core import edge as E
+    from adapters import arena as A
+    from adapters import derived_can_produce
+
+    art = [{"id": "claim-0001", "type": "claim", "author": "u1"},
+           {"id": "claim-0002", "type": "claim", "author": "u1"}]
+    only_supports = [{"kind": "supports", "from_id": "claim-0001",
+                      "to_id": "claim-0002"}]
+    a = A.to_views(art, only_supports)[0]
+    assert "contradiction" in a.can_produce, (
+        "`supports` 在词表里有互斥对应（contradicts），所以这个视图**能**参与矛盾 —— "
+        "矛盾是跨视图的，不需要它自己内部先有一对互斥关系"
+    )
+    assert E.exclusive("supports", "contradicts")
+
+    # 真正的反例是**没有互斥对应**的种类：Scaffold 的占位种类
+    from adapters import scaffold as SC
+    sc = SC.to_view("SC", [{"id": "con-0001", "relations": ["judge-0001"]},
+                           {"id": "judge-0001", "relations": []}])
+    assert E.SCAFFOLD_UNTYPED in {e["relation"] for e in sc.view["edges"]}
+    assert not any(E.exclusive(E.SCAFFOLD_UNTYPED, o)
+                   for o in E.KNOWN_KINDS if o != E.SCAFFOLD_UNTYPED), \
+        "占位种类不该在互斥集里有对应 —— 若有，这条测试就不再是反例了"
+    assert "contradiction" not in sc.can_produce, "占位种类却声称能产生矛盾"
+
+    assert derived_can_produce(set()) == ("consensus", "omission", "refinement"), \
+        "空边集的视图不该声称能产生竞争解释或矛盾"
+
+
+def test_spec_only_kinds_are_never_used_at_the_frontier():
+    """合成语料与 adapter **只用 arena 产品代码真的会创建的种类**。
+
+    这条是核心更正：原先语料用 `refines` / `related_to`（产品从不产生），
+    等于在一个上游不存在的形态上验证 DCE。
+    """
+    from core import edge as E
+    from checks import boundary
+    ok, detail = boundary.check_no_scaffold_at_frontier()
+    assert ok, detail
+    assert "refines" in E.SPEC_ONLY_KINDS and "related_to" in E.SPEC_ONLY_KINDS
+    assert not E.is_product_kind("refines") and E.is_product_kind("supports")
+    assert E.SCAFFOLD_UNTYPED in E.DCE_DECLARED_KINDS, \
+        "占位种类必须是**本层声明的**，不能借用上游的某个词"
+
+
+def test_arena_disagreement_gap_is_measured_not_hidden():
+    """**接口错位**：Arena 的两方对立形状在 DCE 的矛盾判据下报不出来。
+
+    这条测试的价值在于把错位**固定成一个已知量**，而不是让它
+    在别处以「DCE 漏报」的形式出现。现在它报 0 —— 那就是事实。
+    哪一天有人改了 DCE 的判据或让 adapter 去 reify，这个数字会变，
+    而那正是需要被看见的时刻。
+    """
+    from checks import boundary
+    n, detail = boundary.measure_arena_disagreement_gap()
+    assert n == 0, (f"错位测量变了（{n} 条矛盾）：{detail}\n"
+                    "若这是有意改的，请一并更新这条测试与 DECLARATION 里的记录")
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation
