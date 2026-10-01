@@ -16,6 +16,7 @@ from __future__ import annotations
 from analysis import consensus as C
 from analysis import divergence as D
 from analysis import synthesis as S
+from analysis import focus as F
 
 
 def _subjects(syn) -> dict:
@@ -106,28 +107,42 @@ def run_all() -> list:
                 f"出现 {sorted(present)}；各计数 "
                 f"{ {t: len(got[t]) for t in sorted(got)} }"))
 
-    # ⑧ **焦点塌成 1 个**，而且这不是材料的问题
+    # ⑧ §十一 与 §七 的前提冲突 —— **对「按邻近性」这个依据仍然成立**
     #
-    # 焦点用「共享节点」并查集，那是**传递闭包**。而 §七 的前提正是
-    # 「视图已映射到共享节点空间」—— 三份立场共享 con-0001 / con-0005 / judge-0003，
-    # 于是任何分歧都通过共享节点并成一团。
+    # ⚠️ 这条断言改过一次，而改的原因值得记：它原先查的是 `syn["foci"]`，
+    # 于是把「**旧依据**失效」与「**产品**失效」绑成了一个事实。
+    # 换成按主语分组之后，这条就红了 —— 而红得对：**产品不再失效了。**
+    # 现在它显式地只针对**按邻近性**那一族函数，于是两件事各自被钉住：
     #
-    # **让分歧可算的那个前提，同时让焦点失效。** §十一 与 §七 在这里是冲突的。
-    # 这条钉住它：焦点数变了会当场被看见。
-    n_foci = len(syn["foci"])
-    out.append(("立场：焦点塌成 1 个（§十一 与 §七 的前提冲突）",
-                n_foci == 1,
-                f"{n_foci} 个焦点，锚点 {syn['foci'][0]['anchors'] if syn['foci'] else []}"
-                " —— 共享节点空间让分歧可算，同时让焦点恒等于 1"))
+    #     邻近性依据（距离≤r 或 kNN 分量）在共享节点空间上恒为 1 → 冲突仍在
+    #     产品用的依据是**按主语**，不受那条冲突影响
+    # ⚠️ 循环变量**不能**叫 `r` —— 上面 `r` 已经是结果字典，
+    # 遮蔽之后 `r["views"]` 就变成对整数取下标（`TypeError: 'int' object
+    # is not subscriptable`）。这个会话里第二次栽在同一类错上。
+    prox = {len(F.foci(D.analyse(r["views"]), radius=rr, views=r["views"]))
+            for rr in range(0, 4)}
+    n_prox = sorted(prox)
+    n_subj = len(syn["foci"])
+    out.append(("立场：**邻近性依据**在共享节点空间上塌成 1（§十一 与 §七 的冲突）",
+                n_prox == [1],
+                f"距离≤r（r=0..3）得 {n_prox} 个焦点 —— "
+                "共享节点空间让分歧可算，同时让**邻近性**依据恒等于 1。"
+                f"**产品现在用按主语分组，得 {n_subj} 个**，不受这条冲突影响"))
 
-    # ⑨ 因此 `focused` 压缩比在这个形状下是**假压缩**
+    # ⑨ `focused` 压缩比：**在邻近性依据下是假压缩**
+    #
+    # 它 = 输入 / (共识 + 1)。只说明「全都是一团」，不是概括出了结构。
+    # 按主语分组之后 `focused` 才有实义，所以这条**也改成只针对邻近性依据**。
     from metrics import compression as CMP
-    k = CMP.compression(r["views"], syn)["all_modes"]
-    base = len(syn["consensus"]["records"]) + n_foci
-    out.append(("立场：focused 压缩比是假压缩（= 共识 + 1 个焦点）",
-                abs(k["focused"] - CMP.input_size(r["views"]) / base) < 1e-9,
-                f"focused {k['focused']:.2f} 只说明「全都是一团」，"
-                f"不是概括出了结构；flat {k['flat']:.2f}"))
+    syn_prox = S.build(r["views"], focus_basis="reach")
+    k_prox = CMP.compression(r["views"], syn_prox)["all_modes"]
+    base = len(syn_prox["consensus"]["records"]) + len(syn_prox["foci"])
+    out.append(("立场：`focused` 在**邻近性**依据下是假压缩（= 共识 + 1）",
+                abs(k_prox["focused"] - CMP.input_size(r["views"]) / base) < 1e-9,
+                f"邻近性依据下 focused {k_prox['focused']:.2f} —— "
+                f"那个数只说明「全都是一团」；"
+                f"按主语后 focused {CMP.compression(r['views'], syn)['all_modes']['focused']:.2f}"
+                "，才是概括出来的"))
 
     return out
 
@@ -153,9 +168,11 @@ def report() -> list:
         ("对比：真实语料按体裁切",
          "共识 0、分歧全是 omission、flat 0.33 —— 那是**切面**；"
          "这里是**立场**，四类都自然出现"),
-        ("⚠️ 但焦点塌成 1 个",
-         "§十一 的焦点用「共享节点」并查集 = 传递闭包；而 §七 的前提是"
-         "「视图已映射到共享节点空间」。**让分歧可算的前提，同时让焦点失效。**"
+        ("⚠️ 但**邻近性**依据在共享节点空间上塌成 1 个",
+         "§十一 的邻近性依据用「共享节点」并查集 = 传递闭包；而 §七 的前提是"
+         "「视图已映射到共享节点空间」。**让分歧可算的前提，同时让那个依据失效。**"
+         "产品现在改用**按主语分组**（`synthesis.build` 的默认），"
+         "所以这条冲突仍在，但不再影响产物。"
          "真实语料那 9 个焦点是**切面**（按体裁切，几近不相交）造出来的，"
          "不是立场造出来的"),
     ]

@@ -34,18 +34,30 @@ from . import divergence as D
 from . import focus as F
 
 
-def build(views, radius: int = 0) -> dict:
+def build(views, radius: int = 0, focus_basis: str = "subject") -> dict:
     """从一组视图算出合成结构。**只读入参。**
 
-    `radius` 是焦点聚类的结构距离上界。**默认 0（共享节点），不改变既有结果。**
-    ⚠️ 半径的值**不由本函数决定** —— `focus.calibrate()` 从结构里算出可用区间，
-    调用方若要换值，应当先看那条曲线。见 `analysis/focus.py` 的模块 docstring。
+    `focus_basis` 选焦点的**依据**：
+
+        "subject"  **按记录的主语分组**（默认）。不碰图结构，所以在
+                   共享节点空间上不会塌成一团。见 `analysis/focus.py`。
+        "reach"    按结构距离（旧依据）。`radius=0` 时是「共享节点」，
+                   在共享节点空间上**恒为 1 个焦点** —— 保留是为了可复现旧结果。
+
+    ⚠️ 默认值是 `"subject"` 而不是 `"reach"`，因为**产品不该用一个
+    在预期输入上退化的依据**。改这个默认值之前，先看 `checks/focus.py`
+    里三种依据的对照。
     """
     V.check_distinct(views)
 
     cons = C.consensus(views)
     div = D.analyse(views)
-    fx = F.foci(div, radius=radius, views=views)
+    if focus_basis == "subject":
+        fx = F.subject_foci(div, "structure")
+    elif focus_basis == "reach":
+        fx = F.foci(div, radius=radius, views=views)
+    else:
+        raise ValueError(f"未知的焦点依据 {focus_basis!r}，只认 subject / reach")
 
     # 把焦点号附加到每条分歧记录上（新字典，不改原记录）
     focus_of = {}
@@ -85,6 +97,7 @@ def build(views, radius: int = 0) -> dict:
             "n_views": len(views),
             # 半径是**显式记录**的：换了值，产物就应当看得出换了值
             "focus_radius": radius,
+            "focus_basis": focus_basis,
         },
     }
 

@@ -367,6 +367,170 @@ def _materialize(clusters, records) -> list:
     return out
 
 
+# ══════════════════════════════════════════════════════════════════════
+# 按**主语**分组 —— 换的是依据，不是参数
+# ══════════════════════════════════════════════════════════════════════
+#
+# ⚠️ 换掉「按结构邻近性分组」的理由是一条**量出来的**结论：
+#
+#     立场材料上，距离≤r 的并查集（r=0..5）**恒为 1 个焦点**；
+#     kNN 图弱连通分量（k=1,2,3,5,8）**也恒为 1 个**。
+#     `find.radius`（自然近邻）选出的 k **恰好是全都并上的那个**。
+#
+# 所以毛病既不在尺度、也不在合并规则，而在**依据**：
+# 「结构邻近性」在**共享节点空间**上必然把所有分歧连成一团 ——
+# 而那正是「多个立场就同一个议题争执」的定义。**越是对同一件事有分歧，越会并成一团。**
+#
+# 换的依据是记录的**主语**：这条分歧**是关于什么的**。而主语是记录自带的字段，
+# 不依赖任何图结构。四种记录各有天然的主语（字段名都来自 `divergence` 的输出）：
+#
+#     omission       (`missing_in`)              「哪个视图缺了东西」
+#     refinement     (`coarse`, `fine`)          「谁的粒度比谁粗」
+#     contradiction  (`from`, `to`)              「哪个结构位置被争」
+#     alternative    (`source`, `relation`)      「哪个位置上出现竞争解释」
+#
+# ---
+# 划分**不是**要求，所以这里不保证划分
+# ------------------------------------
+#
+# 焦点是一条记录能挂上的**主语**。一条记录可以同时触及几个主语，
+# 于是**它可以出现在多个焦点里** —— 这正是「划分只是实现选择」的意思。
+# 为此本模块给**两族**焦点，两族的种类不同、天然不冲突：
+#
+#     结构族  主语 = 被争的那个结构位置     （上面四种）
+#     视图族  主语 = 记录牵涉到的每一个视图  （谁卷在里面）
+#
+# 一条记录必然同时落在「≥1 个结构焦点」与「≥1 个视图焦点」里，
+# 而两族不会互相吞并 —— 它们不是同一种东西。`focus_overlap()` 把那张
+# 关联表算出来（形状上就是双聚类里的 **checkerboard**）。
+
+
+def subject_of(record) -> tuple:
+    """一条分歧记录的**主语** —— 它「是关于什么的」。
+
+    主语取自记录自带的字段，**不依赖任何图结构**。这是与按邻近性分组的分界。
+    """
+    t = record["type"]
+    if t == "omission":
+        return ("缺了", record["missing_in"])
+    if t == "refinement":
+        return ("粒度", record["coarse"], record["fine"])
+    if t == "contradiction":
+        return ("被争", record["from"], record["to"])
+    if t == "alternative":
+        return ("竞争", record["source"], record["relation"])
+    raise ValueError(f"未知的记录类型 {t!r}")
+
+
+def views_of(record) -> set:
+    """一条记录**牵涉到哪几个视图**（视图族的主语）。
+
+    与 `subject_of` 分开，因为这两族的主语种类不同：一个是结构位置，一个是视图。
+    两族并列存在，就是允许「一条记录属于多个焦点」的具体形式。
+    """
+    t = record["type"]
+    if t == "omission":
+        # 缺的那个人 + 所有还留着的人，都卷在里面
+        return {record["missing_in"]} | set(prov.views_of(record["sources"]))
+    if t == "refinement":
+        return {record["coarse"], record["fine"]}
+    if t == "contradiction":
+        return set(record["relations"][k][0] for k in record["relations"]) | \
+               set(prov.views_of(record["sources"]))
+    if t == "alternative":
+        return set(record["views"])
+    raise ValueError(f"未知的记录类型 {t!r}")
+
+
+def _all_records(divergence: dict) -> list:
+    return [r for t in ("refinement", "contradiction", "alternative", "omission")
+            for r in divergence.get(t, [])]
+
+
+LABELS = {"缺了": "哪个视图缺了东西", "粒度": "谁的粒度比谁粗",
+          "被争": "哪个结构位置被争", "竞争": "哪个位置上出现竞争解释"}
+
+
+def subject_foci(divergence: dict, family: str = "structure") -> list:
+    """按**主语**分组。`family ∈ {"structure", "view"}`。
+
+    返回的每一项是一个焦点：一个主语 + 挂上它的全部记录。**不是划分** ——
+    同一条记录可以出现在多个焦点里（`family="view"` 时尤其明显）。
+    """
+    records = _all_records(divergence)
+    if family not in ("structure", "view"):
+        raise ValueError("family 只支持 structure / view")
+
+    groups: dict[tuple, list] = {}
+    for r in records:
+        keys = ([subject_of(r)] if family == "structure"
+                else [("视图", v) for v in sorted(views_of(r))])
+        for k in keys:
+            groups.setdefault(k, []).append(r)
+
+    # 编号确定：按主语键排序（不按大小、不按任何权重）
+    out = []
+    for n, key in enumerate(sorted(groups, key=lambda k: tuple(map(str, k))), start=1):
+        recs = groups[key]
+        types: dict[str, int] = {}
+        for r in recs:
+            types[r["type"]] = types.get(r["type"], 0) + 1
+        units = []
+        for r in recs:
+            if "unit" in r:
+                units.append((r["unit"]["kind"], r["unit"]["key"]))
+            elif r["type"] == "contradiction":
+                for rel in r["relations"]:
+                    units.append(("edge", (r["from"], r["to"], rel)))
+            else:
+                for _vid, targets in r["views"].items():
+                    for x in targets:
+                        units.append(("edge", (r["source"], x, r["relation"])))
+        out.append({
+            "focus": f"{'S' if family == 'structure' else 'V'}{n}",
+            "family": family,
+            "subject": key,
+            "label": (LABELS.get(key[0], "") if family == "structure"
+                      else f"视图 {key[1]} 卷入的分歧"),
+            "size": len(recs),
+            "types": {k: types[k] for k in sorted(types)},
+            "units": sorted(set(units), key=lambda x: (x[0], str(x[1]))),
+            "anchors": sorted(set().union(*[anchors(r) for r in recs])),
+            "sources": prov.merge(*[r["sources"] for r in recs]),
+        })
+    return out
+
+
+def focus_overlap(divergence: dict) -> dict:
+    """两族焦点之间的关联表 —— 形状上就是双聚类的 **checkerboard**。
+
+    ⚠️ 它存在的意义是回答「划分够不够用」。若一条记录只属于一个结构焦点、
+    一个视图焦点，那张表就是分块对角的；若它同时属于几个，就是棋盘状的。
+    **本函数只报事实，不判断哪种更好。**
+    """
+    recs = _all_records(divergence)
+    s = subject_foci(divergence, "structure")
+    v = subject_foci(divergence, "view")
+    # 直接按主语重算，不依赖对象身份
+    smap, vmap = {}, {}
+    for i, r in enumerate(recs):
+        smap[i] = subject_of(r)
+        vmap[i] = sorted(views_of(r))
+    s_index = {f["subject"]: f["focus"] for f in s}
+    v_index = {f["subject"]: f["focus"] for f in v}
+    pairs = {}
+    for i, r in enumerate(recs):
+        for vid in vmap[i]:
+            key = (s_index[smap[i]], v_index[("视图", vid)])
+            pairs[key] = pairs.get(key, 0) + 1
+    multi_s = sum(1 for i in range(len(recs))
+                  if vmap[i] and len(vmap[i]) > 1)
+    return {"structure_foci": len(s), "view_foci": len(v),
+            "incidence": pairs,
+            "records_in_multiple_view_foci": multi_s,
+            "n_records": len(recs)}
+
+
 
 def _unit_key_of(record):
     """一条记录的「单元键」，用于确定性排序。"""

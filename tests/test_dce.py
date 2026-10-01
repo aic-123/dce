@@ -591,26 +591,43 @@ def test_positions_produce_all_four_types_naturally():
 
 
 def test_focus_collapses_on_a_shared_node_space():
-    """**§十一 与 §七 的前提冲突**，钉住它。
+    """**§十一 与 §七 的前提冲突**：邻近性依据在共享节点空间上恒为 1。
 
-    焦点用「共享节点」并查集 = **传递闭包**；而 §七 的前提正是
-    「视图已映射到共享节点空间」。于是**让分歧可算的那个前提，同时让焦点恒等于 1**。
+    ⚠️ 这条改过一次，改的原因本身就是一条教训。
+    它原先断言的是 `synthesis.build()` 产物的焦点数 == 1，
+    于是把「**旧依据**失效」与「**产品**失效」绑成了一个事实。
+    产品改用**按主语分组**之后它红了 —— 而红得对：**产品不再失效了。**
 
-    真实语料上一轮量出的 9 个焦点，是**按体裁切片**（几近不相交）造出来的，
-    不是立场造出来的 —— 那是材料形状的产物，不是机制的功劳。
+    现在它显式地只针对**邻近性**那一族函数（`F.foci` / `F.knn_foci`），
+    于是两件事各自被钉住：
 
-    推论：`focused` 压缩比在焦点为 1 时是**假压缩**（= 共识 + 1），
-    它只说明「全都是一团」，不是概括出了结构。
+        §十一 的邻近性依据在共享节点空间上恒为 1   ← 冲突仍在，这是事实
+        产品（`synthesis.build`）用按主语分组        ← 不受那条冲突影响
+
+    另外：`focused` 压缩比在焦点为 1 时是**假压缩**（= 输入 / (共识 + 1)），
+    它只说明「全都是一团」。按主语分组后那个数才有实义。
     """
-    from checks import positions as P
-    r = P.analyse_positions()
-    n_foci = len(r["syn"]["foci"])
-    assert n_foci == 1, f"焦点数变了（{n_foci}）—— 若这是有意改的，请更新本条与 DECLARATION"
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _i = POS.build()
+    d = D.analyse(views)
+
+    # 邻近性依据：距离 ≤ r 与 kNN 分量，**都恒为 1**
+    assert {len(F.foci(d, radius=r, views=views)) for r in range(6)} == {1}
+    assert {len(F.knn_foci(d, views=views, k=k)["foci"])
+            for k in (1, 2, 3, 5, 8)} == {1}
+
+    # 假压缩：只针对邻近性依据
     from metrics import compression as CMP
-    base = len(r["syn"]["consensus"]["records"]) + n_foci
-    k = CMP.compression(r["views"], r["syn"])["all_modes"]
-    assert abs(k["focused"] - CMP.input_size(r["views"]) / base) < 1e-9, \
-        "focused 压缩比的算式变了 —— 它现在应当等于「共识 + 1 个焦点」"
+    from analysis import synthesis as S
+    syn_prox = S.build(views, focus_basis="reach")
+    base = len(syn_prox["consensus"]["records"]) + len(syn_prox["foci"])
+    k = CMP.compression(views, syn_prox)["all_modes"]
+    assert abs(k["focused"] - CMP.input_size(views) / base) < 1e-9
+
+    # 而产品用的是按主语，非退化
+    assert len(S.build(views)["foci"]) > 1
 
 
 def test_positions_are_labelled_as_authored():
@@ -937,6 +954,84 @@ def test_natural_k_objective_is_opposite_to_focus_grouping():
             for r in d[t]]
     nat = F.natural_k(recs, F.structure_graph(views))
     assert len(F.knn_foci(d, views=views, k=nat["k"])["foci"]) == 1
+
+
+def test_focus_requirements_pass():
+    """焦点的六条要求（R1–R6），以及**「是划分」不在其中**。"""
+    from checks import focus
+    for title, ok, detail in focus.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_focus_is_not_a_partition():
+    """**焦点不是划分** —— 一条记录可以属于多个焦点。
+
+    ⚠️ 原先焦点被实现成划分（每条记录恰好一个焦点），而**那个前提从没被论证过**。
+    核到双聚类的 `checkerboard` 结构之后才发现它可以不是划分。
+    实测：立场材料上 **20/20** 条记录牵涉多个视图，关联表是**棋盘状而非分块对角**；
+    真实语料上 192/192 条同样如此。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _i = POS.build()
+    d = D.analyse(views)
+    ov = F.focus_overlap(d)
+    assert ov["records_in_multiple_view_foci"] == ov["n_records"], ov
+    assert ov["structure_foci"] > 1 and ov["view_foci"] > 1, ov
+    # 两族的主语种类不同，所以不会互相吞并
+    s = F.subject_foci(d, "structure")
+    v = F.subject_foci(d, "view")
+    assert all(f["subject"][0] in ("缺了", "粒度", "被争", "竞争") for f in s)
+    assert all(f["subject"][0] == "视图" for f in v)
+
+
+def test_subject_basis_beats_proximity_on_the_intended_input():
+    """**按主语 vs 按邻近性**：在预期输入上前者非退化，后两者退化。
+
+    立场材料（共享节点空间）上：
+        距离 ≤ r 的并查集   1 个焦点（r=0..5 全是）
+        kNN 图弱连通分量    1 个（k=1,2,3,5,8 全是）
+        **按主语            6 个**
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    views, _i = POS.build()
+    d = D.analyse(views)
+    assert {len(F.foci(d, radius=r, views=views)) for r in range(6)} == {1}
+    assert {len(F.knn_foci(d, views=views, k=k)["foci"])
+            for k in (1, 2, 3, 5, 8)} == {1}
+    assert len(F.subject_foci(d, "structure")) > 1
+
+
+def test_subject_foci_compress_the_real_corpus():
+    """真实语料：192 条 omission → **4 个焦点（48×）**。
+
+    这是对 P5（缺失表示会爆炸）的正面回答：原先 192 条记录让 flat 压缩比
+    掉到 0.33（合成比输入还大），现在一级概括就是 4 句话。
+    ⚠️ 但也要看清它的局限：**焦点是个「话头」，不是「故事」** ——
+    「SC-其他 缺了 63 样东西」回答了「哪儿缺」，没回答「缺的是什么」。
+    再往下一级（按单元种类、或按谁还有它）是下一步，仍然不需要阈值。
+    """
+    from checks import realdata as RD
+    from adapters import scaffold as SC
+    from analysis import divergence as D
+    from analysis import focus as F
+    dd = RD.corpus_dir()
+    if dd is None:
+        print("    [跳过] 真实语料不在")
+        return
+    nodes = SC.load_corpus_dir(dd)
+    views = [a.view for a in SC.split_views(nodes, split_by="source.kind")]
+    if len(views) < 2:
+        print("    [跳过] 切不出多视图")
+        return
+    d = D.analyse(views)
+    recs = F._all_records(d)
+    s = F.subject_foci(d, "structure")
+    assert len(s) < len(recs) / 10, f"{len(recs)} 条 → {len(s)} 个，压缩不足 10x"
+    assert all(f["label"] for f in s), "每个焦点都该有可读的话头"
 
 
 def test_dce_partition_equals_frequency_partition():
