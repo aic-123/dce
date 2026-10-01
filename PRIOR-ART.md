@@ -13,12 +13,12 @@
 |---|---|---|
 | 一 · 生态学 β 分解 | ✅ **已实现** | `analysis/beta.py` · `checks/beta.py`（10 条断言） |
 | 二 · 空间统计扫描+蒙特卡洛 | ⬜ 未做 | 半径部分已做（`analysis/focus.py`），**零模型与显著性未做** |
-| 三 · 持久同调 / 合并树 | ⬜ 未做，且**未核对正文** | — |
+| 三 · 持久同调 / 合并树 | ⬜ 未做 | ✅ 公式已核到（HDBSCAN `stability`、FOSC）；纯拓扑定义仍未核到 |
 | 四 · 粗糙集 | ✅ **已实现** | `metrics/approximation.py` · `checks/approximation.py`（9 条断言） |
 | 五 · FCA（`Sep`） | ⬜ 未做 | `Sep` 需要焦点层次，而那依赖半径的嵌套家族 |
-| 六 · 胞腔层上同调 | ⬜ 未做，且**只拿到标题** | — |
-| 七 · 地图方程 | ⬜ 未做，且**未核对正文** | — |
-| 八 · 自适应局部尺度 | ⬜ 未做，**公式未核对** | — |
+| 六 · 胞腔层上同调 | ⬜ 未做 | ✅ 定义已核到（`δ^k`、`H⁰ ≅ Γ(X;F)`）；**实现太早** |
+| 七 · 地图方程 | ⬜ 未做 | ✅ 公式已核到；⚠️「不需要分辨率参数」**已撤** |
+| 八 · 自适应尺度 | ⬜ 未做 | ⚠️ 公式三源二手确认；🆕 另核到 **`find.radius`**（可能更省事） |
 
 **两处实现各自带回了一条新结论**（详见 `DECLARATION.md`）：
 
@@ -56,19 +56,30 @@
 | 二 · 扫描统计量 + 蒙特卡洛 | ✅ **读了正文** | `scanstatistics` 1.1.2 参考手册（含 p 值公式） |
 | 四 · 粗糙集 | ✅ **读了正文**，且**更正了一处公式错误** | `RoughSets` 1.3-8 参考手册 |
 | 五 · 形式概念分析 | ✅ **读了正文** | `fcaR` 的 lattice metrics vignette（含精确公式） |
-| 三 · 持久同调 / 合并树 | ❌ **只有检索片段** | 讲义的 PDF 抓不了（`unsupported content type`） |
-| 六 · 胞腔层上同调 | ⚠️ **只拿到一篇 preprint 的标题** | [Ghrist, Tarski Laplacian](https://www2.math.upenn.edu/~ghrist/preprints/tarski.pdf)（PDF 抓不了） |
-| 七 · 地图方程 | ❌ **只有检索片段** | 未核对 |
-| 八 · 自适应尺度 | ❌ **只有 NIPS 论文的标题与出处** | PDF 抓不了；公式未核对 |
+| 三 · 持久同调 / 合并树 | ✅ **部分读到正文**：HDBSCAN 稳定性公式、FOSC、`clusterTree` 字段 | `hdbscan` 官方文档、CRAN `dbscan` / `TDA` 参考手册 |
+| 六 · 胞腔层上同调 | ✅ **读到正文**（三篇 arXiv HTML，含 `δ^k` 与 `H⁰ ≅ Γ` 的确切表述） | arXiv 1808.01513 / 2511.00677 / 2503.02556 |
+| 七 · 地图方程 | ✅ **公式读到正文**；❌ **「不需要分辨率参数」没有正文支持，且有反证线索** | arXiv 2409.10263 有精确式；2311.04036 的目录有 `Resolution limit.` 小节 |
+| 八 · 自适应尺度 | ⚠️ **三源二手确认**（公式一致），**原论文措辞未核对**（NIPS 全文是 PDF） | CRAN `T4cluster` / `FuzzySpec` + MetricGate 文档 |
 
-**没核对过的条目一律按「未验证」对待。** 下面凡是引用正文的地方都标了出处与页码/函数名，
-凡是没标的就是还没核对。
+**第二轮检索（补上原先只有片段的四条）另核到：**
 
-⚠️ 另外三处**抓取失败**值得记下来，免得下次重复踩：PDF 一律抓不了
-（`unsupported content type "application/pdf"`）；Wiley 的 `doi/full` 返回 403；
-Wikipedia 与 SEP 在这一环境里 `fetch failed`。
-**能用的路子是「实现方的参考手册」** —— CRAN 的 `refman/*.html` 是纯 HTML、
-带公式、而且写着定义的人往往就是方法本人。
+- **HDBSCAN 稳定性的精确式子**（`λ = 1/distance`，`stability = Σ_p (λ_p − λ_birth)`），
+  以及抽取规则（自下而上，子簇稳定性之和大于本簇则取和，否则宣布本簇已选并取消其后代）
+- **FOSC 的跨尺度形式化**：`max J = Σ δ_i S(C_i)`、`S(C_i) = Σ (1/h_min − 1/h_max)`，
+  并且原文的语义正是「**在所有可能的阈值上扫一遍，跨多个阈值存活的簇才是更强的候选**」
+  —— 那是我在第 3 条里想说的东西的**确切出处**
+- **胞腔层的确切定义**：stalk、限制映射、上边界算子 `δ^k`、以及
+  **`H⁰(X;F) ≅ Γ(X;F)`（整体截面）** 和 `H¹` 是粘合障碍
+- **`find.radius`（自然近邻）**：一个**声称 parameter-free 的自适应邻域大小**
+  做法 —— 这条直接对着 P1，见 §八
+
+⚠️ **三处必须标出来的问题**（详见各节）：
+
+1. **§七 那句「Infomap 没有分辨率参数」是错的或至少未经验证** —— 已撤。
+2. **「excess of mass」这个术语在任何抓到的正文里都没出现**，只有 "stability"。
+3. **`pers(b) = death − birth` 那个教科书定义没在抓到的正文里出现** ——
+   所以「持续性的确切定义」只核到了 HDBSCAN 与 FOSC 两个**工程版本**，
+   纯拓扑版本的定义**仍未核对**。
 
 ---
 
@@ -229,16 +240,52 @@ Andres Baselga，包名副标题就是
 
 ## 三、拓扑：**持久同调 / 合并树** —— 「不固定半径」的原理化版本
 
-### 是什么
+### 是什么（读了正文，**但纯拓扑那一半仍未核对**）
 
-不要为一个点云选一个尺度，而是**在所有尺度上看它**，记录结构的**出生与死亡**，
-然后**只保留活得久的**（persistence）。合并树（merge tree）是把单参数族的
-聚类合并过程记成一棵树；聚类在某个尺度区间里**持续存在**就叫「稳定」。
-（[Persistence and Clustering 讲义](https://cs.slu.edu/~chambers/fall18/bioalgs/schedule/PersistenceAndClustering.pdf)）
+不要为一个点云选一个尺度，而是**在所有尺度上看它**，只保留活得久的。
 
-同一件事在密度聚类里的工程化版本是 **HDBSCAN**：
-在全部密度上建层次，然后按**簇的稳定性**抽取簇 —— **没有全局 ε**
-（[HDBSCAN 综述](https://upcommons.upc.edu/bitstreams/3b08f1fb-fac1-4041-9c69-e8e59afa0f99/download)）。
+**工程版本（已核到确切公式）：HDBSCAN 的簇稳定性**
+（[hdbscan 官方文档](https://hdbscan.readthedocs.io/en/latest/how_hdbscan_works.html)）：
+
+    λ = 1 / distance
+    λ_birth(簇分裂出来时)   λ_death(它再分裂时)
+    λ_p = 点 p 掉出该簇时的 λ，介于 λ_birth 与 λ_death 之间
+
+    **stability = Σ_{p ∈ 簇} ( λ_p − λ_birth )**
+
+    抽取规则：先设所有叶节点为已选；按**逆拓扑序自下而上**，若子簇稳定性之和
+    > 本簇稳定性，则把本簇稳定性**设为子簇之和**，否则**宣布本簇已选并取消其全部后代**
+
+同页还给互可达距离：`d_mreach-k(a,b) = max{ core_k(a), core_k(b), d(a,b) }`
+
+**另一个工程版本（已核到确切公式）：FOSC 的跨尺度形式化**
+（[CRAN dbscan 参考手册](https://cran.r-project.org/web/packages/dbscan/refman/dbscan.html)，
+出处 Campello/Moulavi/Zimek/Sander 2013, DMKD 27(3):344-371）：
+
+    max_{δ₂..δ_k}  J = Σ_{i=2}^{k} δ_i · S(C_i)
+    S(C_i) = Σ_{x_j ∈ C_i} ( 1/h_min(x_j, C_i) − 1/h_max(C_i) )
+
+而它的说明文字**正是我在第 3 条里想说的东西**：
+
+> if you vary the linkage/distance threshold across **all possible values**,
+> more prominent clusters that **survive over many threshold variations**
+> should be considered as stronger candidates
+
+**合并树**（[CRAN TDA 参考手册](https://cran.r-project.org/web/packages/TDA/refman/TDA.html)）：
+`clusterTree` 返回超水平集的簇树（`lambda` 树与 `kappa` 树），字段含
+`id/children/parent/.../lambdaBottom/lambdaTop/rBottom/rTop`；
+`diagram` 是 `P×3` 矩阵：第一列维数（0/1/2），第二三列 Birth 与 Death。
+
+### ⚠️ 两处必须标出来的未核对
+
+1. **「excess of mass」这个术语在任何抓到的正文里都没出现** —— 只有 "stability"。
+   第一版用了那个词，**撤掉**。
+2. **`pers(b) = death − birth` 那个教科书定义没在抓到的正文里出现** ——
+   TDA 手册的 `silhouette` / `maxPersistence` 段没进抓取窗口。
+   所以「持续性的确切定义」**只核到了 HDBSCAN 与 FOSC 两个工程版本**，
+   纯拓扑的 barcode/persistence 定义**仍未核对**。
+   `h_min` / `h_max` 的准确定义也没核到（手册只给符号，DMKD 原文付费墙）。
+
 
 ### 映射到 DCE
 
@@ -379,13 +426,37 @@ and **the degree of dependency**」。
 
 ## 六、应用拓扑：**胞腔层与上同调** —— 「分歧能不能粘起来」
 
-### 是什么
+### 是什么（**读到正文，含确切定义**）
 
-把局部的数据（每个节点/每条边上看到的局部一致性）当成一个**层（sheaf）**，
-全局一致的部分是第 0 上同调 `H⁰`（层的整体截面），
-而**粘不起来的障碍**是第 1 上同调 `H¹`。
-Ghrist 等把它做成了网络科学里的工具（
-[Cellular Sheaves of Lattices and the Tarski Laplacian](https://www2.math.upenn.edu/~ghrist/preprints/tarski.pdf)）。
+把局部数据当成一个**层（sheaf）**：局部一致的部分是 `H⁰`，**粘不起来的障碍**是 `H¹`。
+确切定义（[Hansen & Ghrist, arXiv:1808.01513v1](https://arxiv.org/html/1808.01513v1)）：
+
+    胞腔层：每个胞腔 σ 赋一个向量空间 F(σ)（stalk）；
+            每个关联对 σ ⊴ τ 给一个线性映射 F_{σ⊴τ}: F(σ) → F(τ)；
+            并要求 F_{σ⊴σ} = id 且 ρ ⊴ σ ⊴ τ ⟹ F_{ρ⊴τ} = F_{σ⊴τ} ∘ F_{ρ⊴σ}
+
+    整体截面：x 是「每胞腔取 x_σ ∈ F(σ) 且 x_τ = F_{σ⊴τ} x_σ 对**所有** σ ⊴ τ 成立」
+              其空间记作 Γ(X; F)
+
+    C^k(X;F) = ⊕_{dim σ = k} F(σ)
+    带符号关联数 [σ:τ] ∈ {0, ±1}，且 Σ_γ [σ:γ][γ:τ] = 0      ← 上边界算子的来源
+
+    δ^k|_{F(σ)} = Σ_{dim τ = k+1} [σ:τ] · F_{σ⊴τ}
+
+原文接着写：`δ^k ∘ δ^{k−1} = 0`，且
+**`H⁰(X;F)` 自然同构于 `Γ(X;F)`，即整体截面的空间。**
+
+"`H⁰` classifies global sections and **H¹ the obstructions thereunto**"、
+"the obstacle is **precisely the torsion in `H¹ = C¹/im d`**"
+（[Ghrist & Ding, arXiv:2511.00677](https://arxiv.org/html/2511.00677)）
+
+⚠️ **两版渲染的编号不同**：arXiv 版里胞腔层是 Def 2、整体截面是 Def 3；
+ar5iv 版是 Def 4、Def 5。**引用必须注明版本**，否则对不上号。
+
+同一条思路在分布式系统里也有（[arXiv:2503.02556](https://arxiv.org/html/2503.02556)）：
+「胞腔层是分析**局部计算的全局一致性要求**的自然数学框架」、
+「**终止解恰好就是它的整体截面**」、「任务层的上同调**编码了求解的障碍**」。
+
 
 ### 映射到 DCE
 
@@ -409,11 +480,49 @@ DCE 现在做不到这个区分：它把所有分歧平铺成一堆记录。
 
 ## 七、信息论：**地图方程 / 描述长度** —— 「几个焦点」由谁定
 
-### 是什么
+### 是什么（**公式读了正文；但有一句话没有正文支持，已撤**）
 
-Infomap 的地图方程（map equation）用**最小描述长度**选社区划分：
-在图上做随机游走，用两段式编码编码这条游走，**让编码最短的划分就是答案**。
-与模块度不同，它**没有分辨率参数**（模块度有分辨率极限问题）。
+Infomap 的地图方程用**最小描述长度**选社区划分。**两级形式的精确式子**（Eq.1）：
+
+    L(M) = q_↶ · H(Q) + Σ_{m∈M} p_m^↻ · H(P_m)
+
+    q_↶  = Σ_m q_m^↶        整体模块进入率
+    q_m^↶                   模块 m 的进入率
+    p_m^↻ = q_m^↷ + Σ_{u∈m} p_u   模块使用率（q_m^↷ 是离开率）
+    H                        Shannon 熵
+    Q   = { q_m^↶ / q_↶ }
+    P_m = { q_m^↷ / p_m^↻ } ∪ { p_u / p_m^↻ }
+    T_uv = w_uv / Σ_v w_uv,  p_v = Σ_u p_u T_uv
+
+**多级形式**（Eq.2）：`L(M) = q_↶ H(Q) + Σ_{m∈M} L(m)`
+（[arXiv:2409.10263v1](https://arxiv.org/html/2409.10263v1)）
+
+MDL 论证（[综述 arXiv:2311.04036](https://arxiv.org/html/2311.04036v3)）：
+「使网络流量的压缩最大化的那个划分，等价于识别出最能抓住那些流量规律性的模块」；
+「给定一个划分，地图方程算出随机游走**每步描述长度的下界**」；
+「找到能用**最短代码**解释数据的模型，在模型复杂度与拟合之间权衡」。
+
+### ⚠️ 更正五：**「不需要分辨率参数」这句话我写了，但没有正文支持**
+
+第一版写的是「与模块度不同，它**没有分辨率参数**（模块度有分辨率极限问题）」。
+**撤掉。** 检索的结论是：
+
+- 读到的支持最多只到「MDL 自动权衡复杂度与拟合，**自动决定簇数**」
+  （2409.10263 有 `automatically selecting the optimal number of clusters`、
+  `does not require explicit regularisation`）—— 那是**关于簇数**的，不是
+  关于**分辨率**的，两者不是一回事
+- 而**反证线索**：那篇综述的目录里**明确有 `Resolution limit.` 小节**
+  （§III.3 *Challenges and remedies* 的第一项）。**它的正文没抓到**，
+  但一个小节的存在本身就说明这个领域把它当成一个问题在讨论
+
+**所以这句不许当作已验证结论引用。** 这也是一条方法论上的收获：
+「我印象里它没有那个毛病」与「正文说了它没有那个毛病」是两件事，
+而这次差别体现在一个**方向相反**的结论上。
+
+（抓取失败记录：`mapequation.org` 已改版，`how-it-works` 页 404、
+`/map-equation/` 404；`mapequation.r-universe.dev` 403 Cloudflare；
+`raw.githubusercontent.com/mapequation/infomap/master/README.md` 404（分支名不对）。）
+
 
 ### 映射到 DCE
 
@@ -433,18 +542,50 @@ Infomap 的地图方程（map equation）用**最小描述长度**选社区划�
 
 ## 八、聚类方法侧：**自适应尺度**（把半径变成局部量）
 
-### 是什么
+### 是什么（**三源二手确认；原论文措辞未核对**）
 
-- **自调谐谱聚类**：每个点有自己的局部尺度 `σ_i = 到第 k 个近邻的距离`，
-  于是「半径」不再是全局常数，而是逐点导出
-  （[Zelnik-Manor & Perona, NIPS 2004](https://proceedings.neurips.cc//paper/2004/file/40173ea48d9567f1f393b20c855bb40b-Paper.pdf)）
+- **自调谐谱聚类**：每个点有自己的局部尺度，于是「半径」不再是全局常数，而是逐点导出
+
+      σ_i  =  **到第 k 个近邻的距离**
+      A_ij =  exp( −d(x_i, x_j)² / (σ_i · σ_j) )
+
+  出处：Zelnik-Manor & Perona, NIPS 17 (2004/2005), 1601-1608。
+
+  ⚠️ **这条是三个独立的 HTML 二手源一致确认的，不是原论文**：
+
+      CRAN `T4cluster` 的 `sc05Z`  —— 「σ_i is the distance from a point x_i to its
+                                       nnbd-th nearest neighbor」，默认 `nnbd = 7`
+                                      （[出处](https://search.r-project.org/CRAN/refmans/T4cluster/html/sc05Z.html)）
+                                      ※ 该页把 `d(x_i, d_j)` 写成了 `d_j`，是笔误
+      CRAN `FuzzySpec` 的 `compute.sigma` / `make.adjacency`
+                                      （[出处](https://cran.r-project.org/web/packages/FuzzySpec/refman/FuzzySpec.html)）
+      MetricGate 的文档                 （[出处](https://metricgate.com/docs/self-tuning-spectral-clustering/)）
+
+  **原论文全文是 PDF**（`proceedings.neurips.cc`），本环境抓不了；
+  唯一的 HTML 落地页只有摘要（只说 "a 'local' scale should be used"，**无公式**）。
+  所以：**公式 = 三源二手确认；原文措辞 = 未核对；`k=7` 这个默认值来自第三方文档。**
+
 - **HDBSCAN**：见第三节，稳定性代替 ε
+
+### 🆕 新核到的一条，可能最省事：`find.radius`（自然近邻）
+
+[CRAN `FuzzySpec` 参考手册](https://cran.r-project.org/web/packages/FuzzySpec/refman/FuzzySpec.html)：
+
+> `find.radius`：**自然近邻**（natural nearest neighbor）。让 r 递增，
+> 直到「入度为 0 的点数不再下降」就停。原文称这是一种
+> **parameter-free way to adaptively set the neighbourhood size**
+> （改自 Zhu / Feng / Huang 2016, PRL 80:30-36）
+
+**这一条直接对着 P1，而且它的形式比 `knn_zones` 更贴近我们要的：**
+它的停止条件是**数据本身的一个现象**（没有点再是「孤立」的），不是我拍的半径。
+本仓库那个 `r*`（焦点塌成 1 的最小半径）也是从结构算出来的，
+但它是**塌缩点**，而 `find.radius` 是**饱和点** —— 两者都可能有用，
+而且都满足「上界由数据算出」那条规矩。
 
 ### 映射到 DCE
 
 我们现在的半径是**全局**的（`_within(adj, a, radius)`）。
-**自适应版本**是：每条分歧记录自己的尺度 —— 例如
-「它与最近的另一条分歧记录之间的距离」。于是：
+**自适应版本**是：每条分歧记录自己的尺度。于是：
 
     锚点稀疏处 → 尺度大（不会强行与远处并）
     锚点密集处 → 尺度小（近处就并）
@@ -458,9 +599,12 @@ Infomap 的地图方程（map equation）用**最小描述长度**选社区划�
 ### 代价
 
 - 需要一个 k（近邻数），而 k 又是一个参数 —— 但它比半径温和得多
-  （k 是「看几个邻居」，半径是「多远算近」，前者对结果的影响小一个量级）
+  （k 是「看几个邻居」，半径是「多远算近」，前者对结果的影响小一个量级）。
+  **而 `find.radius` 那条正好可能把 k 也消掉**（用饱和条件代替选 k）——
+  这是它比自调谐谱聚类更值得先试的理由
 - 自适应尺度会让结果**不再有单调性**（半径那套单调不增的断言会失效），
   要换一组不变量来钉
+
 
 ---
 
@@ -472,21 +616,69 @@ Infomap 的地图方程（map equation）用**最小描述长度**选社区划�
 | **2** | 粗糙集的**正域 / 依赖度 + 约简** | **P2/P3** | 低：属性二值，**离散化免费**；视图数是个位数，约简可枚举 | 借**经典那一半**（无参数）。⚠️ **但先要判据上想清用 α 还是 γ** —— 两个量不是一个意思 |
 | **3** | 形式概念分析的**分离度 `Sep(C)`** | **P2** | 低：公式就是「比子概念多覆盖了什么」 | 这一条是新加的、原先漏掉的。它比稳定性更贴合 P2 要问的「这一步有没有新增信息」 |
 | **4** | 空间统计的**候选簇家族 + 蒙特卡洛** | **P1 的显著性那一半** | 中：要定义零模型 | ⚠️ **更正后的判断**：它**不替我们选半径**（`zones` 是必填输入）。它能给的是「给出家族之后，哪些焦点是真的」。**半径那一步仍是本层要声明的判据** |
-| 5 | **自适应局部尺度**（`knn_zones` 就是现成形式） | P1 | **低**：改 `cluster()` 一处 | 注意：`scanstatistics` 的 `knn_zones` **就是「逐层递增的嵌套家族」**——把它当局部尺度的模板，比我自己另想一个温和得多 |
-| 6 | 合并树 / 持久性 | P1/P2 | 中高：需要带权距离 | ⚠️ **未核对正文**，先放着 |
-| 7 | 概念格 + 稳定性 | P3 | 高：指数膨胀 | 与粗糙集重叠，二选一；**但它的 `Sep` 单独可用**（见上） |
-| 8 | 地图方程 | P1/P2 | 高：需要权重 | ⚠️ **未核对正文** |
-| 9 | 胞腔层上同调 | 分歧的**性质** | 最高 | **现在太早**：DCE 连共识是不是合取都还没定 |
+| 5 | **`find.radius`（自然近邻）** —— 🆕 第二轮的收获 | **P1** | **低**：改 `cluster()` 一处 | **升到最高优先级的候选。**它的停止条件是**数据里的一个现象**（入度为 0 的点不再下降），不是我拍的半径；**而且它可能把 k 也消掉**（用饱和代替选 k） |
+| 6 | 自适应局部尺度（`σ_i` = 到第 k 近邻距离） | P1 | 低 | 三源二手确认了公式；比第 5 条多一个要选的 k，所以**排在它后面** |
+| 7 | HDBSCAN 稳定性 / FOSC / 合并树 | P1/P2 | 中高：需要带权距离 | ✅ 公式已核到（`stability = Σ(λ_p − λ_birth)`；FOSC `Σ(1/h_min − 1/h_max)`）。**纯拓扑的 barcode 定义仍未核到**，但两个工程版本够用 |
+| 8 | 概念格 + 稳定性 | P3 | 高：指数膨胀 | 与粗糙集重叠，二选一；**但它的 `Sep` 单独可用**（见上） |
+| 9 | 地图方程 | P1/P2 | 高：需要权重 | ✅ 公式已核到（两级 `L(M) = q_↶H(Q) + Σ p_m^↻H(P_m)`）。⚠️ 但第一版那句「不需要分辨率参数」**已撤** |
+| 10 | 胞腔层上同调 | 分歧的**性质** | 最高 | ✅ 定义已核到（`δ^k`、`H⁰ ≅ Γ(X;F)`）。**但实现仍然太早**：DCE 连共识是不是合取都还没定 |
 
-**一句话（修订版）**：P4 借生态学（核过正文，而且它有多地点版与自带的显著性检验）；
-P2 先借粗糙集的**正域**并把 α/γ 的取舍写进判据，再加上 FCA 的 `Sep`；
-P1 先照 `knn_zones` 的样子把半径换成**逐层递增的嵌套家族**（改动最小），
-再用蒙特卡洛回答「哪些焦点是真的」。
+**一句话（第二轮修订版）**：P4 借生态学（✅ 已实现）；P2 借粗糙集（✅ 已实现）
+加上 FCA 的 `Sep`；P1 **先试 `find.radius`**（改动最小、且可能连 k 一起消掉），
+其次 `σ_i` 局部尺度；**判别「哪些焦点是真的」再上零模型**。
+第 10 条定义齐了但实现太早，第 9 条公式齐了但缺权重来源。
+
 
 **读正文之后新增的一条元结论**：这四个领域里有三个（生态、粗糙集、FCA）
 **都自带「不要阈值」的机制，而且都是在自己的领域里解决了几十年的问题**。
 DCE 现在卡的那两处（焦点、指标），不是没人解决过，是**我们没去找**。
 
+
+---
+
+## 附：第二轮检索的其余收获（都有正文与 URL）
+
+这些是检索过程中撞见的、与「多视图差异度量 / 无阈值分组 / 显著性检验」相关的成熟条目。
+**都读到了正文**，但**都还没评估是否值得借**。
+
+| 条目 | 核心式子 / 说法 | 出处 |
+|---|---|---|
+| **DBCV**（密度聚类的内部有效性指标） | DSC = 簇内 MST（基于 all-points-core-distance 的互可达距离）最大边权；DSPC = 两簇 MST 内部节点间最小可达距离；指数 ∈ [−1,1]；噪声只进加权平均 | CRAN `dbscan` refman |
+| **Bottleneck / Wasserstein 距离** | 「两个图里点的最优匹配的代价」，对角线点参与匹配；Wasserstein 由 p 定幂次 | CRAN `TDA` refman |
+| **TDA 的显著性检验** | `bootstrapDiagram`（取 (1−α) 分位的 bottleneck/Wasserstein）；`bootstrapBand`（ℓ∞ bootstrap 一致置信带）；`hausdInterval`（c=2q，[0,c] 为有效 (1−α) 置信区间，引 Fasy et al. 2013 Thm 3）；`multipBootstrap` | CRAN `TDA` refman |
+| **蒙特卡洛 p 值**（与第二节同式） | `φ = (1 + Σ_{i=1..R} I(λ_i > λ*)) / (1 + R)` | CRAN `scanstatistics` refman |
+| **FARI**（模糊 Adjusted Rand Index） | Frobenius 内积，比较行和为 1 的隶属矩阵 | Andrews/Browne/Hvingelby 2022, J. Classification 39:326-342 |
+| **SNN**（共享最近邻相似度） | `SNN(i,j) = |N_r(i) ∩ N_r(j)| / r` | CRAN `FuzzySpec` refman |
+| **`find.radius`（自然近邻）** | 见 §八 —— **这条已单列进优先级表** | CRAN `FuzzySpec` refman |
+| **算术持续性 / 精度分级条码** | `dim_{R/π} im(∂_k) = #{j : 1 ≤ a_j ≤ k}`；`|H¹_tors| = (#(R/π))^{Σ a_j}`；`d ≡ d' (mod π^m) ⟹ ∂_k(d) = ∂_k(d')` for k < m | [arXiv:2511.00677](https://arxiv.org/html/2511.00677) |
+
+⚠️ **注意其中两条的性质**：`bootstrapDiagram` / `hausdInterval` 那一族是
+**bootstrap 置信区间**，而本仓库的规矩是「阈值要有基线数据」——
+bootstrap 正好是**用数据自己造基线**，与那条规矩相容。
+这与 `field/` 里已经用熟的置换检验 + Holm 校正同族。
+
+---
+
+## 附：抓取失败清单（免得下次重复踩）
+
+| URL | 结果 |
+|---|---|
+| `mapequation.org/infomap/how-it-works/` | 站点改版，404（公式页已不存在） |
+| `mapequation.org/map-equation/` | 404 |
+| `mapequation.r-universe.dev/infomap/doc/manual.html` | 403 Cloudflare |
+| `raw.githubusercontent.com/mapequation/infomap/master/README.md` | 404（分支名非 master） |
+| `github.com/mapequation/infomap` | 被导航栏占满，正文前截断 |
+| `ar5iv.labs.arxiv.org/html/2311.04036`（及 v1） | `fetch failed` / 超时（两次） |
+| `arxiv.org/html/2503.02556v1`、`/2511.00677v1` | 超时（**去掉版本号后成功**） |
+| `export.arxiv.org/api/query?...` | `fetch failed` |
+| `proceedings.neurips.cc` 的 NIPS 2004 全文、`arXiv:1402.4385`（地图方程分辨率极限） | **仅 PDF**，抓不了 |
+| Wiley `doi/full`、`en.wikipedia.org`、`plato.stanford.edu` | 已知 403 / `fetch failed` |
+
+**可复用的路子（两轮都靠它拿到正文）**：
+
+    CRAN 参考手册      https://cran.r-project.org/web/packages/<包>/refman/<包>.html
+    hdbscan 官方文档    https://hdbscan.readthedocs.io/...
+    arXiv HTML 版      https://arxiv.org/html/<id>      ← **不要带 v1 后缀，容易超时**
 
 ---
 
