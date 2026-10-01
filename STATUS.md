@@ -220,7 +220,52 @@ DCE 只做一件事：给定一组**已经映射到同一节点空间**的视图
 
 ---
 
-## 五、需要裁决的设计问题（我不替它决定）
+## 五、已经由**判据**判过、不需要再裁决的
+
+⚠️ **Arena 接口那件事不是一个悬案** —— `CRITERIA.md` §五 早就裁了。
+我前面把它列成「需要裁决的设计问题」，那是**又一次把手上的文件当成悬案**。
+
+`CRITERIA.md` §五 的三条出路与裁决（原文）：
+
+    ✗ 改 DCE 的判据去迁就上游 —— 判据该由设计稿决定，不该由上游的写法决定
+    ✗ 在 adapter 里 reify 一个虚构的共享端点 —— 那会造出上游没有的结构，
+      而 §C9 #9 禁止无法追溯的结构
+    ✓ **承認它对不上，然后把材料按判据造**
+
+而 `generators/positions.py` **就是这条裁决的落地**，
+`test_arena_disagreement_gap_is_measured_not_hidden` 钉着「这个缺口被量出来、
+没有被藏起来」。所以：**DCE 在 Arena 数据上报 0 条矛盾，是判据的结果，不是缺陷。**
+
+---
+
+## 六、公开数据库：找到了一份能用的
+
+**卡在哪**：两份现成材料的 `n_rescued` 都是 0，所以要真材料；
+
+**不该做**：自己造一份专门触发它的材料（**那就是自选语料**，本项目吃过那次亏）。
+
+**找到的**：`villmow/datasets_knowledge_embedding` 仓库的 `other/countries/`
+下有 **`countries_S1` / `countries_S2` / `countries_S3`** 三份：
+
+    格式        TSV：`实体 \t 关系 \t 实体`
+    关系        只有两种：`locatedin`、`neighbor`
+    规模        每份 train 约 30KB
+    ⭐ 关键    三份的 `test.txt`/`valid.txt` 是**同一个 blob**（sha 相同），
+                而 `train.txt` **各不相同** ——
+                即**同一个节点空间上的三个视图，结构部分重叠、部分不同**
+
+这正是 DCE 需要的形状，而且**来源公开、可核对**（不是造的）。
+已抓过 S1 与 S2 的正文确认格式（都是 HTTP 200）。
+
+⚠️ **待办（下一步，尚未做）**：把三份落到 `adapters/` 做一个 adapter，
+量 `n_rescued` 与五类分歧。**下载方式**：`web_fetch` 只把正文送进对话（很贵），
+要落盘得先解决本机 TLS（`Invoke-WebRequest` 走 schannel 会失败，
+AGENTS.md 记的 `git -c http.sslBackend=openssl` 那条路是给 git 用的；
+`curl.exe` 还没试）。
+
+---
+
+## 七、需要裁决的设计问题（我不替它决定）
 
 1. **Arena 接口接不上**（P6）。Arena 把对立表达成
    `evid-0001 supports claim-0001` vs `evid-0002 contradicts claim-0001`
