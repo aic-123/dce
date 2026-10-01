@@ -1121,6 +1121,91 @@ def test_synthesis_carries_the_second_level():
     assert syn2["provenance"]["focus_basis"] == "reach"
 
 
+def test_stability_matches_its_literal_definition():
+    """**`stability` 的容斥实现是推导出来的，所以必须拿字面定义核。**
+
+    定义：`σ(C) = |{ A ⊆ Ext(C) | A' = Int(C) }| / 2^{|Ext(C)|}`
+
+    ⚠️ 直接枚举子集是指数的，所以主实现用**容斥**：
+    「坏的 A」= ⋃_{m ∉ Int} P(Ext_m)，因为 `A' ≠ Int ⟺ A' ⊋ Int`。
+    **内涵越大、外侧属性越少、容斥项越少** —— 与枚举的复杂度正好相反。
+
+    这条测试拿字面定义在 `|Ext| ≤ 12` 上暴力核，两条路必须给出
+    **精确相同的有理数**（用 `Fraction`，不是浮点近似）。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    from checks import concepts as CK
+    views, _i = POS.build()
+    recs = F._all_records(D.analyse(views))
+    lat = K.lattice(recs, views)
+    ctx = lat["context"]
+    checked = 0
+    for c in lat["stabilities"]["concepts"]:
+        if c["stability"] is None or len(c["extent"]) > 12:
+            continue
+        assert CK._brute_stability(ctx, c["intent"], c["extent"]) == c["stability"], \
+            f"容斥与定义不符：{sorted(c['intent'])[:2]}"
+        checked += 1
+    assert checked >= 20, f"只核了 {checked} 个概念，样本太小"
+
+
+def test_sep_and_stability_are_different_quantities():
+    """`Sep` 与 `stability` 核自同一份正文，但**问的不是一件事**：
+
+        Sep        比直接子概念多覆盖了什么   —— **新增信息**
+        stability  随机删掉一部分外延后内涵还保得住吗 —— **对噪声的稳健性**
+
+    实测：62 个概念的 1891 个可比配对里，**228 对序相反**。
+    所以两者不能互相替代，两个都要报。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    views, _i = POS.build()
+    lat = K.lattice(F._all_records(D.analyse(views)), views)
+    rows = [c for c in lat["stabilities"]["concepts"] if c["stability"] is not None]
+    inv = tot = 0
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            tot += 1
+            if (rows[i]["sep"] - rows[j]["sep"]) * \
+               (rows[i]["stability"] - rows[j]["stability"]) < 0:
+                inv += 1
+    assert inv > 0, "两者序完全一致 —— 那它们就是同一个量了"
+    assert all(0 <= float(c["stability"]) <= 1 for c in rows)
+
+
+def test_level_criterion_needs_both_conditions():
+    """层级判据：值得显示的层必须有「`|Ext| > 1` **且** `Sep > 0`」的概念。
+
+    ⚠️ 这条判据**改过两次**，两次的形状一样：**少一个合取项就把退化情形放进来了。**
+
+        第一版  只用「|Ext| > 1」      → 层 0–4 也算，而那些层上 Sep>0 的是 0 个
+        第二版  只用「Sep > 0」        → 层 8 也算，而它只有 1 个概念、外延只 1 条
+        现在    两者都要              → 有用层 [5, 6, 7]
+
+    `|Ext| = 1` 意味着「这个概念恰好是一条记录」—— 展示它不是概括。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    views, _i = POS.build()
+    lv = K.lattice(F._all_records(D.analyse(views)), views)["levels"]
+    for r in lv["by_rank"]:
+        if r["worth_showing"]:
+            assert r["n_summarizing"] > 0, \
+                f"层 {r['rank']} 被判值得显示，但没有「|Ext|>1 且 Sep>0」的概念"
+    assert lv["useful_ranks"], "一个有用层都没有 —— 判据太严了"
+    # 深层的概念才拥有记录，浅层是冗余的
+    assert min(lv["useful_ranks"]) > 0, \
+        "最浅的层也被判成有用 —— 一般性概念按定义应当在子概念面前冗余"
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation

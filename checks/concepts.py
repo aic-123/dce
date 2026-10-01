@@ -51,6 +51,35 @@ def _positions():
     return views
 
 
+def _brute_stability(ctx: dict, intent: frozenset, extent: frozenset):
+    """**独立实现**：直接按定义枚举 `Ext(C)` 的全部子集。
+
+        σ(C) = |{ A ⊆ Ext(C) | A' = Int(C) }| / 2^{|Ext(C)|}
+
+    容斥是**我推的**（见 `concepts.stability` 的注释），所以必须拿字面定义核。
+    ⚠️ 只在 `|Ext| ≤ 15` 上用 —— 那是**暴力**，指数复杂度，超出就不是它该干的活。
+    """
+    from fractions import Fraction
+    from itertools import combinations
+    if not extent:
+        return Fraction(0)
+    objs = sorted(extent)
+    good = 0
+    for r in range(len(objs) + 1):
+        for A in combinations(objs, r):
+            S = set(A)
+            if not S:
+                # 空集的外延是全部对象，内涵是全体特征；只有它是 Int(C) 时才算好
+                common = set(ctx["all_attrs"])
+            else:
+                common = set(ctx["all_attrs"])
+                for o in S:
+                    common &= ctx["attrs"][o]
+            if frozenset(common) == intent:
+                good += 1
+    return Fraction(good, 1 << len(extent))
+
+
 def run_all() -> list:
     from analysis import divergence as D
     from analysis import focus as F
@@ -152,6 +181,54 @@ def run_all() -> list:
          for e in K.second_level(D.analyse(list(reversed(views))), views)]
     out.append(("确定性：输入逆序不改变二级结果", a == b,
                 f"{len(a)} 个一级焦点" + ("" if a == b else "，逆序后不同")))
+
+    # ⑨ **`stability` 的容斥实现 vs 字面定义暴力版**
+    #
+    # 容斥那条（`concepts.stability`）是**我推的**，所以必须拿定义核。
+    # 暴力版只在 |Ext| ≤ 12 上跑 —— 指数复杂度，超出不是它该干的活。
+    st = lat["stabilities"]["concepts"]
+    checked, bad_st = 0, []
+    for c in st:
+        if c["stability"] is None or len(c["extent"]) > 12:
+            continue
+        b2 = _brute_stability(ctx, c["intent"], c["extent"])
+        checked += 1
+        if b2 != c["stability"]:
+            bad_st.append((sorted(c["intent"])[:2], len(c["extent"]),
+                           str(c["stability"]), str(b2)))
+    out.append((f"`stability` 容斥实现 vs 字面定义（{checked} 个概念）",
+                not bad_st and checked > 0,
+                f"不符 {bad_st[:2]}" if bad_st else
+                f"{checked} 个概念（|Ext| ≤ 12）两条路径给出**精确相同的有理数**"))
+
+    # ⑩ `Sep` 与 `stability` **不是同一个量**
+    rows = [c for c in st if c["stability"] is not None]
+    inv = tot_pairs = 0
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            tot_pairs += 1
+            if (rows[i]["sep"] - rows[j]["sep"]) * \
+               (rows[i]["stability"] - rows[j]["stability"]) < 0:
+                inv += 1
+    out.append(("`Sep` 与 `stability` 是两个不同的量（序大量相反）",
+                inv > 0,
+                f"{len(rows)} 个概念的可比配对里，序相反的 {inv}/{tot_pairs} —— "
+                "「新增信息」与「对噪声的稳健性」不是一件事"))
+
+    # ⑪ 层级：值得显示的层**必须**有 Sep>0 的概念
+    #
+    # ⚠️ 这条判据改过一次：第一版只用「|Ext|>1」，于是把层 0–4 也判成值得显示，
+    # 而实测那些层上 Sep>0 的概念**是 0 个**（一般性概念在子概念面前完全冗余）。
+    lv = lat["levels"]
+    wrong = [r for r in lv["by_rank"]
+             if r["worth_showing"] and r["n_summarizing"] == 0]
+    out.append(("层级判据：值得显示的层必须有「|Ext|>1 且 Sep>0」的概念",
+                not wrong,
+                f"错判 {[(r['rank'], r['n_summarizing']) for r in wrong]}" if wrong
+                else f"有用层 {lv['useful_ranks']}（格最深 {lv['max_rank']}）—— "
+                     "**有用的概念集中在深（具体）层，浅层是冗余的**。"
+                     "判据改过两次：第二版只要求 Sep>0，于是把「只有 1 个概念、"
+                     "外延只有 1 条记录」的层也放进来 —— 而展示那一条不是概括"))
 
     return out
 

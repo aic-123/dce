@@ -175,14 +175,135 @@ def label(intent: frozenset) -> str:
     return s
 
 
+# ── `stability`：与 `Sep` **不是同一个量** ────────────────────────────
+#
+# 两者都核自同一份正文（`fcaR` 的 lattice metrics vignette），但问的不是一件事：
+#
+#     Sep        这个概念比它的**直接子概念**多覆盖了什么     —— **新增信息**
+#     stability  随机删掉外延的一部分之后，内涵还保得住吗      —— **对噪声的稳健性**
+#
+# 公式（逐字核过）：
+#
+#     σ(C) = |{ A ⊆ Ext(C) | A' = Int(C) }| / 2^{|Ext(C)|}
+#
+# ⚠️ 直接枚举 `Ext(C)` 的子集是指数的。但可以用**容斥**算准：
+#
+#     A' ≠ Int(C)  ⟺  A' ⊋ Int(C)  ⟺  存在 m ∉ Int(C) 使 A 里每个对象都有 m
+#     令 Ext_m = { a ∈ Ext(C) | m ∈ a }，则「坏的 A」= ⋃_{m ∉ Int} P(Ext_m)
+#     所以  σ = 1 − |⋃_m P(Ext_m)| / 2^{|Ext(C)|}
+#     而 |⋃_m P(Ext_m)| 由容斥给出：Σ_{∅≠S⊆(A∖Int)} (−1)^{|S|+1} · 2^{|∩_{m∈S} Ext_m|}
+#
+# **内涵越大，外面的属性越少，容斥项越少** —— 与枚举子集的复杂度正好相反。
+# 而且 `2^n` 是 2 的幂，所以全程可以用**精确有理数**，不用浮点。
+
+MAX_IE_TERMS = 1 << 18
+
+
+def stability(ctx: dict, intent: frozenset, extent: frozenset) -> object:
+    """一个概念的 intensional stability。**精确有理数**（`Fraction`）。
+
+    内涵之外的属性太多（容斥项超过 `MAX_IE_TERMS`）时返回 `None` ——
+    **不算，而不是估算**。估算出来的 stability 与精确值在输出上长得一样。
+    """
+    from fractions import Fraction
+    from itertools import combinations
+    if not extent:
+        return Fraction(0)
+    outside = [m for m in ctx["all_attrs"] if m not in intent]
+    if len(outside) > 20 or (1 << len(outside)) > MAX_IE_TERMS:
+        return None
+    # 每个外侧属性 m 对应的 Ext_m
+    ext_m = {}
+    for m in outside:
+        ext_m[m] = frozenset(a for a in extent if m in ctx["attrs"][a])
+    bad = 0
+    for r in range(1, len(outside) + 1):
+        sign = 1 if r % 2 == 1 else -1
+        for S in combinations(outside, r):
+            inter = extent
+            for m in S:
+                inter = inter & ext_m[m]
+                if not inter:
+                    break
+            bad += sign * (1 << len(inter))
+    return Fraction((1 << len(extent)) - bad, 1 << len(extent))
+
+
+def stabilities(ctx: dict, seps: list) -> dict:
+    """对每个概念算 stability；算不动的记 `None` 并回报个数。"""
+    out, refused = [], 0
+    for s in seps:
+        v = stability(ctx, s["intent"], s["extent"])
+        if v is None:
+            refused += 1
+        out.append({**s, "stability": v})
+    return {"concepts": out, "n_refused": refused, "n_total": len(seps)}
+
+
+def rank(intent: frozenset) -> int:
+    """概念的**层级** = 内涵的大小。这是格深度的自然刻度。"""
+    return len(intent)
+
+
+def levels(ctx: dict, seps: list) -> dict:
+    """按层级（内涵大小）归拢，并给出**结构性**的停止规则。
+
+    ⚠️ 判据改过一次，原因值得记。第一版只用了「这一层还有 `|Ext| > 1` 的概念」，
+    于是把**层 0–4 也判成「值得显示」** —— 而实测那些层上 `Sep > 0` 的概念
+    **是 0 个**：一般性概念在它们的子概念面前**完全冗余**
+    （顶概念的各个子概念的外延并起来就是全体，所以它不「拥有」任何记录）。
+
+    所以正确的判据是：**这一层有「`|Ext| > 1` 且 `Sep > 0`」的概念** ——
+    也就是**它拥有一批记录（不止一条），而且那些记录不是被它的子概念让出来的**。
+    再加「概念数 < 记录数」防止膨胀。三条都是结构事实，**不是阈值**。
+
+    ⚠️ 判据改了**两次**。第二版只要求 `Sep > 0`，于是把只有 1 个概念、
+    外延只有 1 条记录的层也算成「值得显示」——而**展示那一条记录不是概括**。
+    两次修改的形状一样：**判据少了一个合取项，就会把退化情形放进来。**
+
+    这条也顺带回答了一个反直觉的现象：**有用的概念集中在深（具体）层**，
+    不是浅（一般）层。
+    """
+    by: dict[int, list] = {}
+    for s in seps:
+        by.setdefault(rank(s["intent"]), []).append(s)
+    rows = []
+    for k in sorted(by):
+        cs = by[k]
+        n_sep = sum(1 for c in cs if c["sep"] > 0)
+        # 「真的概括了东西」的概念：拥有一批记录（>1）且不是冗余的
+        n_summarizing = sum(1 for c in cs
+                            if c["sep"] > 0 and len(c["extent"]) > 1)
+        rows.append({
+            "rank": k,
+            "n_concepts": len(cs),
+            "n_multi": sum(1 for c in cs if len(c["extent"]) > 1),
+            "max_extent": max((len(c["extent"]) for c in cs), default=0),
+            "sep_positive": n_sep,
+            "n_summarizing": n_summarizing,
+            "worth_showing": n_summarizing > 0 and len(cs) < ctx["n_objects"],
+        })
+    useful = [r["rank"] for r in rows if r["worth_showing"]]
+    return {"by_rank": rows, "useful_ranks": useful,
+            "deepest_useful_rank": (max(useful) if useful else None),
+            "shallowest_useful_rank": (min(useful) if useful else None),
+            "max_rank": max(by) if by else None,
+            "rule": "这一层有「|Ext|>1 且 Sep>0」的概念（真的概括了不止一条记录）"
+                    "且概念数 < 记录数 → 值得显示；"
+                    "**三条都是结构事实，不是阈值**"}
+
+
 def lattice(records: list, views, max_concepts: int = MAX_CONCEPTS) -> dict:
-    """一次算完：形式背景 → 全部概念 → 分离度。"""
+    """一次算完：形式背景 → 全部概念 → 分离度 → stability → 层级。"""
     ctx = context(records, views)
     got = all_concepts(ctx, max_concepts=max_concepts)
     seps = separation(got["concepts"])
+    st = stabilities(ctx, seps)
+    lv = levels(ctx, seps)
     return {"context": ctx, "n_concepts": got["n_concepts"], "seps": seps,
             "irredundant": [s for s in seps if s["sep"] > 0],
-            "redundant": [s for s in seps if s["sep"] == 0]}
+            "redundant": [s for s in seps if s["sep"] == 0],
+            "stabilities": st, "levels": lv}
 
 
 # ── 二级概括：一级焦点**内部**再展开 ────────────────────────────────
