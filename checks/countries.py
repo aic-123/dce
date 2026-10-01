@@ -74,7 +74,32 @@ def run_all() -> list:
                 f"源数据 {sorted(src_rels)} → 视图里只有 {sorted(kinds)}；"
                 "原文保留在 metadata.source_triples 里"))
 
-    # ③ 三份是一条**严格嵌套链**，且差集**全是 locatedin**
+    # ②b ⚠️ **检验我自己那个映射选择有没有把分歧藏起来**
+    #
+    # 把两种关系压平成 `dce_untyped`，等于把这份数据里**唯一可能有互斥关系的组合**
+    # 抹掉。所以必须回头查：**有没有哪个有序对本来挂过两种关系？**
+    # 若有，那本来就该是 `contradiction`，而我把它抹掉了。
+    #
+    # 实测 **0 例**（视图内部 0、跨视图 0）—— 映射是安全的。
+    # ⚠️ 但这条要一直留着：**换了数据它可能变成非 0**，那时映射就得改。
+    from collections import defaultdict
+    per = {}
+    for v in views:
+        dd = defaultdict(set)
+        for a, b, r in v["metadata"]["source_triples"]:
+            dd[(a, b)].add(r)
+        per[v["id"]] = dd
+    inner = [1 for dd in per.values() for rs in dd.values() if len(rs) > 1]
+    allp = set().union(*[set(dd) for dd in per.values()])
+    cross = [p for p in allp
+             if len(set().union(*[per[vid].get(p, set()) for vid in per])) > 1]
+    out.append(("⚠️ 压平没有抹掉矛盾（没有有序对挂过两种关系）",
+                not inner and not cross,
+                f"视图内部 {len(inner)} 例、跨视图 {len(cross)} 例 —— **0 例**，"
+                "所以压成 dce_untyped 是安全的。"
+                "⚠️ **换了数据它可能变成非 0，那时映射就得改**"))
+
+
     u = {v["id"]: CS.units_of(v) for v in views}
     tr = {v["id"]: {tuple(x) for x in v["metadata"]["source_triples"]} for v in views}
     nested = u["S3"] < u["S2"] < u["S1"]
