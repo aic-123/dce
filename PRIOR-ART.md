@@ -22,27 +22,86 @@
 
 ---
 
+## 核对结果：哪些读了正文，哪些还只是检索片段
+
+⚠️ **这一节是这份文档最该先看的部分。** 第一版是从检索摘要推的，按本仓库的规矩不能那样用。
+现在把能拿到正文的核对了，**并且更正了两处我原先写错的地方**。
+
+| 条目 | 状态 | 依据 |
+|---|---|---|
+| 一 · β 多样性周转/嵌套 | ✅ **读了正文** | `betapart` 1.6.1 参考手册（维护者 = Baselga 本人） |
+| 二 · 扫描统计量 + 蒙特卡洛 | ✅ **读了正文** | `scanstatistics` 1.1.2 参考手册（含 p 值公式） |
+| 四 · 粗糙集 | ✅ **读了正文**，且**更正了一处公式错误** | `RoughSets` 1.3-8 参考手册 |
+| 五 · 形式概念分析 | ✅ **读了正文** | `fcaR` 的 lattice metrics vignette（含精确公式） |
+| 三 · 持久同调 / 合并树 | ❌ **只有检索片段** | 讲义的 PDF 抓不了（`unsupported content type`） |
+| 六 · 胞腔层上同调 | ⚠️ **只拿到一篇 preprint 的标题** | [Ghrist, Tarski Laplacian](https://www2.math.upenn.edu/~ghrist/preprints/tarski.pdf)（PDF 抓不了） |
+| 七 · 地图方程 | ❌ **只有检索片段** | 未核对 |
+| 八 · 自适应尺度 | ❌ **只有 NIPS 论文的标题与出处** | PDF 抓不了；公式未核对 |
+
+**没核对过的条目一律按「未验证」对待。** 下面凡是引用正文的地方都标了出处与页码/函数名，
+凡是没标的就是还没核对。
+
+⚠️ 另外三处**抓取失败**值得记下来，免得下次重复踩：PDF 一律抓不了
+（`unsupported content type "application/pdf"`）；Wiley 的 `doi/full` 返回 403；
+Wikipedia 与 SEP 在这一环境里 `fetch failed`。
+**能用的路子是「实现方的参考手册」** —— CRAN 的 `refman/*.html` 是纯 HTML、
+带公式、而且写着定义的人往往就是方法本人。
+
+---
+
 ## 一、生态学：β 多样性的**周转 / 嵌套**分解 —— 直接命中 P4 与 P3
 
-### 是什么
+### 是什么（已核对正文）
 
 群落生态学研究「多个地点之间的物种组成差异有多大」，把那差异（β 多样性）
-拆成两个**正交分量**（Whittaker 1960 之后的标准做法，Baselga 做了成对分解）：
+拆成两个分量。**实现方就是方法本人**：`betapart` 1.6.1 的维护者是
+Andres Baselga，包名副标题就是
+`Partitioning Beta Diversity into Turnover and Nestedness Components`
+（[CRAN 参考手册](https://cloud.r-project.org/web/packages/betapart/refman/betapart.html)）。
 
-    β_jac  =  β_jtu  +  β_jne
+**核到的确切结构**（`beta.pair` / `beta.multi` 的 `Value` 段）：
 
-    β_jtu  周转（turnover）     地点之间**互相替换** —— 谁也不是谁的子集
-    β_jne  嵌套（nestedness）   一个地点的物种是另一个的**子集**
+    两个指数族：sorensen 与 jaccard
+    beta.pair 返回 **3 个**矩阵：
 
-配套概念还有：
+      sorensen 族   beta.sim  周转，用 **Simpson** 成对相异度
+                    beta.sne  嵌套，用 **Sørensen 的嵌套分数**
+                    beta.sor  总相异度，用 Sørensen（β 多样性的单调变换）
 
-- **α / β / γ**：局域 / 之间 / 区域多样性。Whittaker 的关系是 `β = γ / α`
-  （[Whittaker 的分区，见 Plymouth 论文 §2](https://researchportal.plymouth.ac.uk/files/38442346/2014Evans10321284PhD.pdf)）
-- **dark diversity**（暗多样性）：**「本该在那里却不在」的物种** —— 这是生态学
-  对「缺失」的正式概念，而且它**不是**「对立」
-  （[示例文献](https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0032341)）
-- **成对分解的两个分量各自有专门的度量**，而且分量是**连续值**，不是互斥标签
-  （[Once again on the components of pairwise beta diversity](https://www.sciencedirect.com/science/article/abs/pii/S1574954116000133)）
+      jaccard 族    beta.jtu  周转，用 **Jaccard 的周转分数**
+                    beta.jne  嵌套，用 **Jaccard 的嵌套分数**
+                    beta.jac  总相异度，用 Jaccard
+
+⚠️ **更正一**：我原先只写了 `β_jac = β_jtu + β_jne` 这一条，
+而且暗示分量与总量是「Simpson / Sørensen / 三者相加」的随意搭配。
+实际上**两个指数族各自内部才可加**，而且周转分量在 Sørensen 族里用的是
+**Simpson** 指数 —— 跨族混用是错的。要用就得先声明用哪一族。
+
+⚠️ **更正二**：我原先只说了「成对分解」。**`beta.multi` 是多地点的**
+（`beta.SIM`/`beta.SNE`/`beta.SOR` 与 `beta.JTU`/`beta.JNE`/`beta.JAC`）。
+这一条对 DCE 比对成对版本重要得多 —— DCE 是 N 个视图，不是 2 个。
+
+**另外三项核到的、第一版完全没提的东西：**
+
+1. **`beta.sample`：重采样 + 显著性检验是这个框架自带的一步。**
+   手册的例子直接把 p 值算出来：
+   `p.value.beta.SIM <- length(which(south < north)) / 100`，
+   并注释「p<0.01」—— 也就是说**这个领域早就把「置换检验」当成标准配件**，
+   而不是像我以为的那样要从空间统计那边借。对 DCE 的意义：
+   「焦点是不是真的」这个问题，生态学有现成的做法可以直接照搬。
+2. **`beta.temp`：时间维的同一套分解。** DCE 的视图若来自不同时间片，这条路已经铺好。
+3. **⚠️ 命名并不统一 —— 有竞争性的分解。** 手册的参考文献里同时列着
+   [Legendre 2014](https://www.sciencedirect.com/science/article/abs/pii/S1574954116000133)，
+   而 Legendre 那两个分量叫 **replacement / richness difference**，不叫 nestedness；
+   还有 Baselga & Leprieur 2015《Comparing methods to separate components of beta diversity》。
+   **所以「嵌套」这个命名本身是有争论的** —— 借它的时候不能以为它是唯一答案。
+
+配套概念（**这两条仍是检索片段，未核对正文**）：
+
+- **α / β / γ**：Whittaker 的关系是 `β = γ / α`
+- **dark diversity**：**「本该在那里却不在」** —— 生态学对「缺失」的正式概念，
+  而且它**不是**「对立」。对应 DCE 的 omission，且这个对应是第一版里我最看好的一条
+
 
 ### 映射到 DCE
 
@@ -84,22 +143,43 @@
 
 ## 二、流行病学 / 空间统计：**扫描统计量与蒙特卡洛** —— 直接命中 P1
 
-### 是什么
+### 是什么（已核对正文）
 
-Kulldorff 的空间扫描统计量（spatial scan statistic）解决的问题**和 P1 一模一样**：
+`scanstatistics` 1.1.2，包名标题就是 `Space-Time Anomaly Detection using Scan Statistics`，
+描述里写着 **`Hypothesis testing is made possible by Monte Carlo simulation`**
+（[CRAN 参考手册](https://cran.r-project.org/web/packages/scanstatistics/refman/scanstatistics.html)）。
 
-    「有一片区域上的事件点，聚簇在哪？聚簇有多大？」
-    —— **簇的尺度是未知的。**
+**核到的确切机制：**
 
-它的答案是：**不去定半径，而是把所有半径都扫一遍**，每一步算一个似然比，
-然后用**蒙特卡洛置换**（在零模型下重排事件点）算出每一步的显著性，
-取显著的那些。**零模型就是校准**，不需要人为的阈值。
-（[对「未知窗口」这一设计的讨论](http://export.arxiv.org/pdf/1711.08960)）
+    zones 是一个**必填**参数 —— 候选簇的「家族」由**调用方给出**，不是算法自己选。
+    包提供三种标准的家族构造：
 
-同族的还有 **Getis-Ord Gi\***：识别「热点」，而且有**自适应带宽**版本
-（用 k 近邻而不是固定距离），输出的是一张 z 分数图，不做硬切
-（[sfhotspot 的 CRAN 文档](https://mirrors.cstcloud.cn/CRAN/web/packages/sfhotspot/readme/README.html)、
-[Optimized Hotspot Analysis](https://pmc.ncbi.nlm.nih.gov/articles/instance/10642901/bin/pntd.0011688.s003.docx)）
+      knn_zones(k_nearest)      对每个位置，取它的 1、2、…、k 个最近邻构成
+                                **逐层递增的嵌套集合**（这就是「自适应尺度」的现成形式）
+      flexible_zones(knn, adj)  Tango (2005) 的**连通**柔性形状 ——
+                                要求区域内部连通（任何两点可通过区域内部相邻点到达）
+      powerset_zones(n)         1..n 的全部 2^(n-1) 个非空子集（穷举）
+
+    蒙特卡洛 p 值（手册给了精确式子）：
+
+      (1 + Σ_{i=1..R} I(λ_i > λ*)) / (1 + R)
+
+    另有 Gumbel 版本：把 replicate 拟合一个 Gumbel 分布再算 p。
+    零模型由 `permute_matrix(A)` 提供 —— **保持行与列的边际**做置换。
+
+⚠️ **更正三（这条最重要）**：我原先写「**不去定半径，而是把所有半径都扫一遍**」——
+**那是不准确的。** 扫描统计量**不负责选半径**：`zones` 是调用方必须提供的输入。
+它解决的是「**在给定的候选家族里，哪些簇是真的**」，而不是「半径该是多少」。
+
+    它把「选一个半径」换成了「**给出一个可辩护的候选簇家族**」，
+    并用蒙特卡洛回答「这个簇显著吗」。
+
+对 DCE 的意义因此要改写：**不能指望它替我们选半径。**
+它能给的是 —— 我们给出一个锚点邻域家族（照 `knn_zones` 的样子逐层递增），
+然后用置换检验说「哪些焦点是真的」。**半径那一步仍然是本层要声明的判据**，
+只不过可以照 `knn_zones` 那样声明成「逐层递增的嵌套家族」而不是一个数 ——
+那就把我们那个「扫半径报曲线」升级成「扫家族并做显著性判断」。
+
 
 ### 映射到 DCE
 
@@ -159,18 +239,42 @@ Kulldorff 的空间扫描统计量（spatial scan statistic）解决的问题**�
 
 ## 四、粗糙集：**下近似 / 上近似 / 边界域** —— 正面对付 P3（共识太脆）
 
-### 是什么
+### 是什么（已核对正文，且**更正了一处公式错误**）
 
-Pawlak 的粗糙集理论从「对象 × 属性」表出发，定义：
+`RoughSets` 1.3-8（[CRAN 参考手册](https://cran.r-project.org/web/packages/RoughSets/refman/RoughSets.html)）。
+手册里有一句**正好印证本仓库那条规矩**的原文：
 
-    X 的下近似（lower）   **一定**属于 X 的对象
-    X 的上近似（upper）   **可能**属于 X 的对象
-    边界域                上近似 − 下近似
-    近似质量 γ_P(X) = |下近似| / |X|      —— 一个**没有阈值**的连续量
-    **约简（reduct）**     保持可分辨关系不变的**最小属性子集**
+> By using the indiscernibility relation for objects/instances,
+> **RST does not require additional parameters to analyze the data.**
 
-（[R-下近似与 R-上近似](https://uregina.scholaris.ca/server/api/core/bitstreams/cc9b10e3-8056-42d9-aa88-a4d681426c54/content)、
-[γ_P(X)=|P(X)|/|X|](https://link.springer.com/content/pdf/10.1007/978-1-4615-5025-9.pdf)）
+RST 由 **Pawlak 1982** 提出。包自己列的基础概念是四项：
+**不可分辨关系 / 下上近似 / 正域 / 可辨矩阵**，
+而正域的用途手册写的是「determine objects that are included in positive region
+and **the degree of dependency**」。
+
+⚠️ **更正四：我原先写的 `γ_P(X) = |下近似| / |X|` 把两个不同的量混成了一个。**
+粗糙集里有两个都叫「质量」的东西，**必须分开**：
+
+    近似精度（accuracy of approximation）
+        α_R(X) = |R̲X| / |R̄X|      **下近似 ÷ 上近似**
+    近似质量 / 依赖度（quality of approximation / degree of dependency）
+        γ_R(X) = |POS_R(X)| / |U|  **正域 ÷ 全体**
+
+我原先那个式子是 α 的形状却挂了 γ 的名字。**对 DCE 而言两者含义不同，
+选哪一个是有后果的**：α 说的是「确定在里面的占可能在里面的多少」（紧不紧），
+γ 说的是「全体里有多少是能确定的」（覆盖多少）。P2 要的是哪一个，得先想清楚
+—— 这正是「先写判据」那条规矩的用处。
+
+**另外两条核到的、值得记的：**
+
+1. **模糊粗糙集把参数又请回来了。** 包的 FRST 部分有 `t.tnorm` / `t.implicator` /
+   `alpha`（FVPRS）/ `beta.quasi`（β-PFRS）/ `k.rfrs`（RFRS）/ `q.some`,`q.most`（VQRS）
+   一整排参数。**经典 RST 无参数，扩展版不是。**
+   对 DCE 的含义：**要借就借经典那一半**，模糊那半会重新引入本仓库不能有的阈值。
+2. **离散化在包里是一个独立任务**（`D.discretization.RST`），因为 RST 要求离散属性。
+   **而 DCE 的属性本来就是二值的**（单元在不在某个视图里），
+   所以这一步对我们是**免费**的 —— 这是这段借用里最省事的一点。
+
 
 ### 映射到 DCE
 
@@ -201,14 +305,34 @@ Pawlak 的粗糙集理论从「对象 × 属性」表出发，定义：
 
 ## 五、形式概念分析：**概念格 + 稳定性** —— 共识结构的另一种正式化
 
-### 是什么
+### 是什么（已核对正文）
 
-从「对象 × 属性」表构造**概念格**：每个概念是一对
-（外延 = 对象集，内涵 = 属性集），且是极大配对。整个格是**无参数**的。
-每个概念还有一个**稳定性指标**（Kuznetsov）：衡量该概念对随机删掉一部分
-对象/属性有多稳健 —— 连续值，不需要阈值。
-（[fcaR 的 lattice metrics](https://mirrors.cstcloud.cn/CRAN/web/packages/fcaR/vignettes/advanced_lattice_metrics.html)、
-[同上的 Rmd 源](https://rdrr.io/cran/fcaR/f/vignettes/advanced_lattice_metrics.Rmd)）
+`fcaR` 的 lattice metrics vignette
+（[CRAN](https://mirrors.cstcloud.cn/CRAN/web/packages/fcaR/vignettes/advanced_lattice_metrics.html)）。
+从「对象 × 属性」表构造**概念格**：每个概念是一对（外延 = 对象集，内涵 = 属性集）且极大配对。
+**整格是无参数的** —— 这一点由「找概念」本身不引入阈值保证。
+
+**核到的精确公式（三个指标，我只写了第一个）：**
+
+    稳定性（intensional stability，对噪声的稳健性）
+        σ(C) = |{ A ⊆ Ext(C) | A' = Int(C) }| / 2^{|Ext(C)|}
+
+    分离度（separation，这个概念引入了多少**新**对象）
+        Sep(C) = |Ext(C)| − |∪_{K ≺ C} Ext(K)|
+                 （≺ 是直接子概念）
+
+    模糊密度（density，概念在原始关系里的内聚程度）
+        ρ(C) = Σ_{g ∈ Ext(C), m ∈ Int(C)} I(g,m) / (|Ext(C)| · |Int(C)|)
+        ⚠️ 二值数据下密度恒为 1 或 0 —— **对 DCE 无用**，因为我们就是二值的
+
+⚠️ **新增：`Sep(C)` 是我原先完全漏掉、而它可能比稳定性更有用的一个量。**
+它问的是「这个概念比它的直接子概念多覆盖了哪些对象」——
+翻成 DCE 的话：**这个焦点比它下面的焦点多解释了什么结构。**
+那正是 P2（压缩）缺的那种「这一步到底有没有新增信息」的判据，
+而且它是**纯结构的、不需要阈值**。
+
+（这条仍是检索片段，未核对）
+
 
 ### 映射到 DCE
 
@@ -317,24 +441,29 @@ Infomap 的地图方程（map equation）用**最小描述长度**选社区划�
 
 ---
 
-## 判断与优先级
-
-按「能解开哪个开口 + 落地成本」排序：
+## 判断与优先级（读正文之后修订过）
 
 | 优先 | 借什么 | 解开 | 成本 | 判断 |
 |---|---|---|---|---|
-| **1** | 生态学的**周转/嵌套**分解 | **P4**（判据层面的毛病） | 中：四类名要重写 | **最该借。它正是我量出来的那个问题的现成答案，而且有几十年的争论史可以避坑** |
-| **2** | 粗糙集的**近似质量 γ + 约简** | **P2/P3** | 低：视图数是个位数，可枚举 | 给 P2 一个不与 `§C9 #5` 冲突的指标定义，给 P3 一个「脆共识」的量化 |
-| **3** | 空间统计的**扫描 + 零模型** | **P1** | 中：要定义零模型 | 你说的「不固定半径、让它校准」的成熟版；比我们的 `r*` 多了「哪些焦点是真的」 |
-| **4** | **自适应局部尺度** | **P1** | **低**：改 `cluster()` 一处 | 改动最小、最可能直接见效；但要不变量换一组 |
-| 5 | 合并树 / 持久性 | P1/P2 | 中高：需要带权距离 | 与我们已在算的曲线天然衔接 |
-| 6 | 概念格 + 稳定性 | P3 | 高：指数膨胀 | 与粗糙集重叠，二选一 |
-| 7 | 地图方程 | P1/P2 | 高：需要权重 | 理念漂亮，落地远 |
-| 8 | 胞腔层上同调 | 分歧的**性质** | 最高 | **现在太早**：DCE 连共识是不是合取都还没定 |
+| **1** | 生态学的**周转/嵌套**分解 | **P4** | 中：四类名要重写；**且要先声明用 sorensen 还是 jaccard 族** | **仍然最该借。**核过正文之后理由更硬：它带**多地点版本**（`beta.multi`，正是 N 视图所需）**和自带的重采样显著性检验**（`beta.sample`） |
+| **2** | 粗糙集的**正域 / 依赖度 + 约简** | **P2/P3** | 低：属性二值，**离散化免费**；视图数是个位数，约简可枚举 | 借**经典那一半**（无参数）。⚠️ **但先要判据上想清用 α 还是 γ** —— 两个量不是一个意思 |
+| **3** | 形式概念分析的**分离度 `Sep(C)`** | **P2** | 低：公式就是「比子概念多覆盖了什么」 | 这一条是新加的、原先漏掉的。它比稳定性更贴合 P2 要问的「这一步有没有新增信息」 |
+| **4** | 空间统计的**候选簇家族 + 蒙特卡洛** | **P1 的显著性那一半** | 中：要定义零模型 | ⚠️ **更正后的判断**：它**不替我们选半径**（`zones` 是必填输入）。它能给的是「给出家族之后，哪些焦点是真的」。**半径那一步仍是本层要声明的判据** |
+| 5 | **自适应局部尺度**（`knn_zones` 就是现成形式） | P1 | **低**：改 `cluster()` 一处 | 注意：`scanstatistics` 的 `knn_zones` **就是「逐层递增的嵌套家族」**——把它当局部尺度的模板，比我自己另想一个温和得多 |
+| 6 | 合并树 / 持久性 | P1/P2 | 中高：需要带权距离 | ⚠️ **未核对正文**，先放着 |
+| 7 | 概念格 + 稳定性 | P3 | 高：指数膨胀 | 与粗糙集重叠，二选一；**但它的 `Sep` 单独可用**（见上） |
+| 8 | 地图方程 | P1/P2 | 高：需要权重 | ⚠️ **未核对正文** |
+| 9 | 胞腔层上同调 | 分歧的**性质** | 最高 | **现在太早**：DCE 连共识是不是合取都还没定 |
 
-**一句话**：P4 该借生态学（那是它本行），P2/P3 该借粗糙集（离散属性 ↔ 多视图，
-几乎是为这个问题长的），P1 先试自适应局部尺度（改动最小），
-再考虑加零模型把它变成显著性判断。
+**一句话（修订版）**：P4 借生态学（核过正文，而且它有多地点版与自带的显著性检验）；
+P2 先借粗糙集的**正域**并把 α/γ 的取舍写进判据，再加上 FCA 的 `Sep`；
+P1 先照 `knn_zones` 的样子把半径换成**逐层递增的嵌套家族**（改动最小），
+再用蒙特卡洛回答「哪些焦点是真的」。
+
+**读正文之后新增的一条元结论**：这四个领域里有三个（生态、粗糙集、FCA）
+**都自带「不要阈值」的机制，而且都是在自己的领域里解决了几十年的问题**。
+DCE 现在卡的那两处（焦点、指标），不是没人解决过，是**我们没去找**。
+
 
 ---
 
