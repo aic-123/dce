@@ -558,6 +558,80 @@ def test_arena_disagreement_gap_is_measured_not_hidden():
                     "若这是有意改的，请一并更新这条测试与 DECLARATION 里的记录")
 
 
+def test_positions_material_matches_criteria():
+    """按 `CRITERIA.md` 造的三份立场，必须**按判据**分类。
+
+    ⚠️ 这条测的**不是**「算法对不对」，而是「材料与判据是否一致」。
+    不一致时改的是**材料**（`generators/positions.py`），不改判据 ——
+    反过来做就是「试到好看为止」，正是 §T0.3 要防的。
+    """
+    from checks import positions as P
+    for title, ok, detail in P.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_positions_produce_all_four_types_naturally():
+    """四类差异必须由**立场之间的真实差别**自然产生，
+    而不是像上一轮那样把四类分别种在四个专用视图上。
+
+    上一轮那套构造被自己的反例扫描证伪了：144 个配置只有 54 个建得出来，
+    而 54/54 都是「四类各占专用视图」的干净情形。
+    """
+    from checks import positions as P
+    r = P.analyse_positions()
+    got = r["got"]
+    for t in ("contradiction", "alternative", "refinement", "omission"):
+        assert got[t], f"{t} 没有自然出现"
+    # 立场之间必须既有共享（→ 共识）又有差别（→ 分歧）
+    assert len(r["consensus"]) > 0, "三份立场没有共享结构，那就不是「同一议题上的立场」"
+    # 而且不能是「一份包含另一份」的退化解
+    units = [__import__("analysis.consensus", fromlist=["x"]).units_of(v)
+             for v in r["views"]]
+    assert not (units[0] == units[1]), "两份立场完全相同，测不到分歧"
+
+
+def test_focus_collapses_on_a_shared_node_space():
+    """**§十一 与 §七 的前提冲突**，钉住它。
+
+    焦点用「共享节点」并查集 = **传递闭包**；而 §七 的前提正是
+    「视图已映射到共享节点空间」。于是**让分歧可算的那个前提，同时让焦点恒等于 1**。
+
+    真实语料上一轮量出的 9 个焦点，是**按体裁切片**（几近不相交）造出来的，
+    不是立场造出来的 —— 那是材料形状的产物，不是机制的功劳。
+
+    推论：`focused` 压缩比在焦点为 1 时是**假压缩**（= 共识 + 1），
+    它只说明「全都是一团」，不是概括出了结构。
+    """
+    from checks import positions as P
+    r = P.analyse_positions()
+    n_foci = len(r["syn"]["foci"])
+    assert n_foci == 1, f"焦点数变了（{n_foci}）—— 若这是有意改的，请更新本条与 DECLARATION"
+    from metrics import compression as CMP
+    base = len(r["syn"]["consensus"]["records"]) + n_foci
+    k = CMP.compression(r["views"], r["syn"])["all_modes"]
+    assert abs(k["focused"] - CMP.input_size(r["views"]) / base) < 1e-9, \
+        "focused 压缩比的算式变了 —— 它现在应当等于「共识 + 1 个焦点」"
+
+
+def test_positions_are_labelled_as_authored():
+    """材料是**自己造的**，不许被当成从论文抽取的引用。
+
+    节点 id 与标题取自真实语料当词汇表，但**立场结构是本层设计的** ——
+    把它们当成「论文说了什么」会是伪造引用。
+    """
+    from generators import positions as POS
+    views, _intent = POS.build()
+    for v in views:
+        assert v["source"]["ref"].startswith("authored://"), \
+            f"{v['id']} 的来源标记不是 authored://（{v['source']['ref']}）"
+        assert v["metadata"].get("authored") is True
+    # 词汇表必须真的来自真实语料，且用到的节点都在表里
+    assert "judge-0003" in POS.VOCAB and "con-0005" in POS.VOCAB
+    for v in views:
+        for n in v["nodes"]:
+            assert n in POS.VOCAB, f"{n} 不在词汇表里"
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation

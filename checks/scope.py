@@ -62,7 +62,11 @@ EXPECTED = {
                # Scaffold 的 `source.kind` 是中文的「论文/教材/…」，
                # 而 DCE 的是英文的「model/human/paper/…」，交集为空。
                # 它还需要一个**第三态**：语料不在时显式跳过（跳过不等于通过）。
-               "realdata"},
+               "realdata",
+               # ⚠️ `positions`：判据要按设计稿定，而**上游给不出判据需要的形状**。
+               # 所以材料得按判据自己造 —— 本模块验的就是「造出来的三份立场
+               # 是否按判据分类」。顺序不能反：不一致时改**材料**，不改判据。
+               "positions"},
     # ⚠️ `adapters` 是 §十八 要求的边界层。它单列成一个顶层包，
     # **就是那条方向约束的结构形式**：核心不许 import 这一层，
     # 而 `checks/boundary.py` 把这条钉成可执行检查。
@@ -72,7 +76,10 @@ EXPECTED = {
     # 混在一个 700 行的文件里以后没人分得清改了哪个。
     # 拆出来的直接动因：上一轮量出语料库只会造连通的随机图，
     # 于是 §十一 的焦点机制全程空转（1416 条分歧塌成 1 个焦点）。
-    "generators": {"synthetic", "topology", "__init__"},
+    "generators": {"synthetic", "topology", "__init__",
+                   # `positions`：按 `CRITERIA.md` 的判据自己造的多视图材料
+                   # （三份立场），词汇表取自真实语料，结构由本层设计。
+                   "positions"},
     "tests": {"test_dce", "run_tests"},
 }
 
@@ -106,7 +113,8 @@ def check_layout() -> tuple[bool, str]:
             detail.append(f"{pkg} 多出 {sorted(extra_m)}")
     if detail:
         return False, "；".join(detail)
-    return True, f"6 个包、{sum(len(v) for v in EXPECTED.values())} 个模块，与 §十七 一致"
+    return True, f"{len(LAYOUT)} 个包、{sum(len(v) for v in EXPECTED.values())} " \
+                 "个模块，与 §十七 一致"
 
 
 def _is_local(mod: str, from_file: Path) -> bool:
