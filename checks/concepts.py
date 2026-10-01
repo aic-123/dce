@@ -57,19 +57,23 @@ def _brute_stability(ctx: dict, intent: frozenset, extent: frozenset):
         σ(C) = |{ A ⊆ Ext(C) | A' = Int(C) }| / 2^{|Ext(C)|}
 
     容斥是**我推的**（见 `concepts.stability` 的注释），所以必须拿字面定义核。
-    ⚠️ 只在 `|Ext| ≤ 15` 上用 —— 那是**暴力**，指数复杂度，超出就不是它该干的活。
+    ⚠️ 只在 `|Ext| ≤ 12` 上用 —— 那是**暴力**，指数复杂度，超出就不是它该干的活。
+
+    ⚠️ **这里故意不设「外延为空」的特例分支。** 主实现对外延为空返回 `None`
+    （定义退化，给 0 或给 1 都是选约定）。原先两边**共享**了那个分支
+    （都返回 0），于是交叉核对**根本测不到它** ——
+    **两条路径共享一段代码时，它们只在共享之外互相检验。**
+    现在这里按字面算（空外延给 1），差异被下面的断言显式钉住。
     """
     from fractions import Fraction
     from itertools import combinations
-    if not extent:
-        return Fraction(0)
     objs = sorted(extent)
     good = 0
     for r in range(len(objs) + 1):
         for A in combinations(objs, r):
             S = set(A)
             if not S:
-                # 空集的外延是全部对象，内涵是全体特征；只有它是 Int(C) 时才算好
+                # 空集的外延是全部对象，内涵是全体特征 —— 字面定义如此
                 common = set(ctx["all_attrs"])
             else:
                 common = set(ctx["all_attrs"])
@@ -175,14 +179,24 @@ def run_all() -> list:
                     f"（{r_on['level2_compression']:.1f}x）"))
 
     # ⑦ 过滤开关按**结构判据**工作（不是阈值）
-    lv2_all = K.second_level(d, views, only_if_compresses=False)
-    lv2_flt = K.second_level(d, views, only_if_compresses=True)
+    #
+    # ⚠️ 这条原先查的是**默认参数**下的产物，而默认已经开了秩过滤 ——
+    # 于是「被滤掉的桶」是空集，`all(...)` 恒真，**成了空断言**。
+    # 本仓库禁「空跑也过」，所以改成在**会展开的那个配置**上查
+    # （`rank_filter=False`，立场材料上确实有桶会展开）。
+    lv2_all = K.second_level(d, views, only_if_compresses=False,
+                             rank_filter=False)
+    lv2_flt = K.second_level(d, views, only_if_compresses=True,
+                             rank_filter=False)
     dropped = [e["parent"] for e, f2 in zip(lv2_all, lv2_flt)
                if e["concepts"] and not f2["concepts"]]
     out.append(("显示规则：`only_if_compresses` 只滤掉「展开」的那些桶",
-                all(e["expands"] for e, f2 in zip(lv2_all, lv2_flt)
-                    if e["concepts"] and not f2["concepts"]),
-                f"滤掉 {dropped}（判据是「二级概念数 ≥ 桶内记录数」，无阈值）"))
+                bool(dropped)
+                and all(e["expands"] for e, f2 in zip(lv2_all, lv2_flt)
+                        if e["concepts"] and not f2["concepts"]),
+                f"（`rank_filter=False` 下）滤掉 {dropped} —— "
+                "**这条必须非空跑：默认参数下已经没有桶会展开，"
+                "拿默认参数查就成了恒真的空断言**（本仓库禁这个）"))
 
     # ⑧ 确定性
     a = [(e["parent"], tuple(e["concepts"] and
@@ -241,6 +255,47 @@ def run_all() -> list:
                      "**有用的概念集中在深（具体）层，浅层是冗余的**。"
                      "判据改过两次：第二版只要求 Sep>0，于是把「只有 1 个概念、"
                      "外延只有 1 条记录」的层也放进来 —— 而展示那一条不是概括"))
+
+    # ⑫ **两条路径的共享盲区**：空外延
+    #
+    # 主实现与暴力核对原先**共享**了 `if not extent: return 0` 这个分支，
+    # 于是交叉核对**根本测不到它** —— 而按字面定义那里该是 **1**
+    # （空集唯一的子集是 ∅，`∅'` = 全体特征 = 该概念的内涵）。
+    #
+    # **两条路径共享一段代码时，它们只在共享之外互相检验。**
+    # 现在主实现改为拒绝（`None`：定义退化，给 0 或 1 都是选约定），
+    # 暴力版按字面算（给 1），差异由这条断言显式钉住。
+    empt = [c for c in st if not c["extent"]]
+    lit = [_brute_stability(ctx, c["intent"], c["extent"]) for c in empt]
+    out.append(("空外延：主实现拒绝（定义退化），字面定义给 1 —— 差异被钉住",
+                bool(empt) and all(c["stability"] is None for c in empt)
+                and all(v == 1 for v in lit),
+                f"{len(empt)} 个空外延概念：主实现 → "
+                f"{sorted({str(c['stability']) for c in empt})}，"
+                f"字面定义 → {sorted({str(v) for v in lit})} —— "
+                "**原先两条路共享这个分支，所以交叉核对测不到它**"))
+
+    # ⑬ **`stability` 撑不起「第二条无阈值过滤路」**
+    #
+    # 曾想过用 `σ = 1`（外延里每个对象恰好只有内涵那些属性 —— 「属性均匀」）
+    # 当二值结构判据。实测它在两份材料上都**从不出现**，所以那条判据是空的。
+    # 于是 stability 要用起来就必须**要么给阈值、要么给零模型** —— 两者都不是结构事实。
+    #
+    # 这正是先前拒绝把它与 `Sep` 合成一个分的理由：一旦合成，
+    # 「它到底有没有判据」这个问题就被一个加权平均抹掉了。
+    ones_pos = [c for c in st if c["stability"] == 1]
+    detail = [f"立场材料 {len(st)} 个概念里 σ=1 的 **{len(ones_pos)}** 个"]
+    ok_verdict = not ones_pos
+    if dd and len(rv) >= 2:
+        rst = K.lattice(F._all_records(rd), rv)["stabilities"]
+        ones_r = [c for c in rst["concepts"] if c["stability"] == 1]
+        ok_verdict = ok_verdict and not ones_r
+        detail.append(f"真实语料 {rst['n_total']} 个里 σ=1 的 **{len(ones_r)}** 个")
+    out.append(("⚠️ `stability` 没有无阈值的二值判据（σ=1 从不出现）",
+                ok_verdict,
+                "；".join(detail) + " —— 所以它**撑不起第二条无阈值过滤路**，"
+                "要用就得给阈值或给零模型。**这正是拒绝把它与 `Sep` 合成一个分的理由**："
+                "一合成，「它到底有没有判据」就被抹掉了"))
 
     return out
 

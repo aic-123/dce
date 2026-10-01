@@ -199,16 +199,29 @@ def label(intent: frozenset) -> str:
 MAX_IE_TERMS = 1 << 18
 
 
-def stability(ctx: dict, intent: frozenset, extent: frozenset) -> object:
+def stability(ctx: dict, intent: frozenset, extent: frozenset):
     """一个概念的 intensional stability。**精确有理数**（`Fraction`）。
 
     内涵之外的属性太多（容斥项超过 `MAX_IE_TERMS`）时返回 `None` ——
     **不算，而不是估算**。估算出来的 stability 与精确值在输出上长得一样。
+
+    ⚠️ **外延为空时也返回 `None`**，理由不是「算不出来」，而是**定义在那里退化**：
+
+        外延 = ∅ → 唯一的子集是 ∅ → `∅' = 全体特征` → σ = 1/1 = **1**
+
+    而「全体特征」正是空外延概念的内涵（`_closure` 就是这么给的），
+    所以字面定义给 1。但那个 1 是**约定，不是事实** ——
+    「空集上唯一的子集保留了内涵」是一句空话，不含任何关于数据的信息。
+    给 0 或给 1 都是在选约定，而**声称它是测量结果就是错的**。所以拒绝。
+
+    ⚠️ 这个坑先前没被发现，因为**主实现与交叉核对共享了同一个特例分支**
+    （两边都 `if not extent: return 0`），于是交叉核对**测不到它**。
+    **两条路径共享一段代码时，它们只在共享之外互相检验。**
     """
     from fractions import Fraction
     from itertools import combinations
     if not extent:
-        return Fraction(0)
+        return None
     outside = [m for m in ctx["all_attrs"] if m not in intent]
     if len(outside) > 20 or (1 << len(outside)) > MAX_IE_TERMS:
         return None

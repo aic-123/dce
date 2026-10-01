@@ -1210,6 +1210,68 @@ def test_level_criterion_needs_both_conditions():
         "最浅的层也被判成有用 —— 一般性概念按定义应当在子概念面前冗余"
 
 
+def test_stability_refuses_the_degenerate_empty_extent():
+    """**两条路径共享一段代码时，它们只在共享之外互相检验。**
+
+    主实现与暴力核对原先**共享**了 `if not extent: return 0` 这个分支，
+    于是那条「两条独立路径」的交叉核对**根本测不到它** ——
+    而按字面定义，空外延的 σ 该是 **1**：
+
+        外延 = ∅ → 唯一的子集是 ∅ → `∅'` = 全体特征 = 该概念的内涵 → 1/1 = 1
+
+    但那个 1 是**约定，不是事实**：「空集上唯一的子集保留了内涵」是一句空话。
+    所以主实现改为拒绝（`None`），暴力版按字面算（1），**差异被显式钉住**。
+
+    ⚠️ 这个坑是本轮一个**假警报**顺带炸出来的：`σ` 有一处印成 `1.0000`
+    其实等于 `1 − 1.3e-11`（`:.4f` 的四舍五入）。**格式化过的数字触发警报时，
+    先多印几位再下结论。**
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    from checks import concepts as CK
+    views, _i = POS.build()
+    recs = F._all_records(D.analyse(views))
+    lat = K.lattice(recs, views)
+    ctx = lat["context"]
+    empt = [c for c in lat["stabilities"]["concepts"] if not c["extent"]]
+    assert empt, "这份材料上应当存在外延为空的那个概念（内涵 = 全体特征）"
+    for c in empt:
+        assert c["stability"] is None, "主实现应当拒绝（定义退化），而不是给 0"
+        assert CK._brute_stability(ctx, c["intent"], c["extent"]) == 1, \
+            "字面定义给的是 1 —— 差异必须被钉住，不能被两边一起抹掉"
+
+
+def test_stability_has_no_threshold_free_criterion():
+    """**`stability` 撑不起「第二条无阈值过滤路」** —— 这是个结论，不是待办。
+
+    曾想过用 `σ = 1`（外延里每个对象恰好只有内涵那些属性，「属性均匀」）
+    当二值结构判据。实测它在两份材料上都**从不出现**（0/62、0/34），
+    所以那条判据是**空的**。于是 stability 要用起来就必须**要么给阈值、
+    要么给零模型** —— 两者都不是「结构事实」，而本仓库的规矩是
+    「不许在缺少基线数据时拍一个阈值」。
+
+    这正是先前拒绝把它与 `Sep` 合成一个分的理由：
+    **一合成，「它到底有没有判据」这个问题就被一个加权平均抹掉了。**
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    views, _i = POS.build()
+    lat = K.lattice(F._all_records(D.analyse(views)), views)
+    st = [c for c in lat["stabilities"]["concepts"] if c["stability"] is not None]
+    assert st, "一个 stability 都没算出来"
+    assert not [c for c in st if c["stability"] == 1], \
+        "σ=1 出现了 —— 那就有了一条无阈值的二值判据，本条结论要重写"
+    # 但它确实是个有内容的量：分布跨越很大范围，不是退化成常数
+    vals = sorted(float(c["stability"]) for c in st)
+    assert vals[0] < 0.5 < vals[-1], "σ 的分布退化了 —— 那它就没有信息"
+    assert any(c["stability"] is None for c in lat["stabilities"]["concepts"]), \
+        "空外延那个概念该被拒绝（见上一条测试）"
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation
