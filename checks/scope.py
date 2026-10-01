@@ -135,9 +135,13 @@ EXPECTED = {
     # ⚠️ `adapters` 是 §十八 要求的边界层。它单列成一个顶层包，
     # **就是那条方向约束的结构形式**：核心不许 import 这一层，
     # 而 `checks/boundary.py` 把这条钉成可执行检查。
-    "adapters": {"__init__", "scaffold", "arena"
-                   # 公开数据库：countries 三视图（数据在仓库外）
-                   "countries",},
+    # ⚠️ `"arena"` 后面那个逗号**不是格式问题**：少了它，Python 会把
+    # `"arena"` 与下一行的 `"countries"` 当成**隐式字符串拼接** → `"arenacountries"`。
+    # 语法完全合法，含义全错，而报错是「清单里多出 ['arena','countries']」——
+    # **指着一个与真实原因无关的地方**。（本仓库第三次栽在「合法但含义错」上。）
+    "adapters": {"__init__", "scaffold", "arena",
+                 # 公开数据库：countries 三视图（数据在仓库外，走三态）
+                 "countries"},
     # ⚠️ `topology` 是**放进去时才解释的**（这条检查的作用正是逼我解释一句）：
     # 语料库的「骨架长什么样」与「视图怎么构造并植入」是两件事，
     # 混在一个 700 行的文件里以后没人分得清改了哪个。
