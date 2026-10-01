@@ -1034,6 +1034,93 @@ def test_subject_foci_compress_the_real_corpus():
     assert all(f["label"] for f in s), "每个焦点都该有可读的话头"
 
 
+def test_concepts_assertions_pass():
+    """概念格与二级概括的全部检查，含 **`Sep` 的两条独立路径交叉核对**。"""
+    from checks import concepts
+    for title, ok, detail in concepts.run_all():
+        assert ok, f"{title} 红了：{detail}"
+
+
+def test_separation_has_two_independent_implementations():
+    """**判据写两遍要漂，所以两遍都得写 —— 但必须是两条独立的路。**
+
+    主实现：先 `e < ext`，再筛「没有中间者」。
+    交叉实现：先取**全部**真下位概念，再从中挑极大的。
+    两者在立场材料的 62 个概念上必须逐位相等。
+
+    （这个仓库吃过一次亏：`refinement` 的判据写在两个函数里，修了一处不生效。）
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    from checks import concepts as CK
+    views, _i = POS.build()
+    recs = F._all_records(D.analyse(views))
+    lat = K.lattice(recs, views)
+    mine = {s["extent"]: s["sep"] for s in lat["seps"]}
+    brute = CK._brute_separation([(s["intent"], s["extent"]) for s in lat["seps"]])
+    assert mine == brute, f"两条路径不一致：{[(e, mine[e], brute[e]) for e in mine if mine[e] != brute[e]][:3]}"
+    assert len(mine) > 10, f"只有 {len(mine)} 个概念，样本太小"
+
+
+def test_second_level_compresses_only_on_big_buckets():
+    """**二级不是「总是更好」** —— 显示规则必须是结构性的。
+
+    立场材料   20 条记录 / 16 特征，多数概念外延只有 1 → 二级只是**展开**（0.9x）
+    真实语料  192 条，桶 63/61/54/14            → 二级**概括**（7.7x）
+
+    规则：`二级概念数 < 桶内记录数`。**没有阈值。**
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import concepts as K
+    views, _i = POS.build()
+    s = K.second_level_summary(D.analyse(views), views)
+    assert s["level2_compression"] < 2, \
+        f"立场材料上二级不该显得像概括：{s['level2_compression']}"
+    # 过滤开关只滤掉「展开」的桶
+    all_ = K.second_level(D.analyse(views), views, only_if_compresses=False)
+    flt = K.second_level(D.analyse(views), views, only_if_compresses=True)
+    for a, b in zip(all_, flt):
+        if a["concepts"] and not b["concepts"]:
+            assert a["expands"], f"{a['parent']} 被滤掉但不是「展开」"
+
+
+def test_lattice_refuses_rather_than_truncates():
+    """**截断过的格算不对 `Sep`** —— 超限必须拒绝。
+
+    `Sep` 依赖覆盖关系（直接子概念），截断会改变覆盖关系，
+    于是算出来的 `Sep` 是一个**看起来对**的错数。
+    """
+    from generators import positions as POS
+    from analysis import divergence as D
+    from analysis import focus as F
+    from analysis import concepts as K
+    views, _i = POS.build()
+    recs = F._all_records(D.analyse(views))
+    try:
+        K.lattice(recs, views, max_concepts=5)
+    except K.ConceptError as e:
+        assert "拒绝算" in str(e)
+        return
+    raise AssertionError("超限时竟然没报错")
+
+
+def test_synthesis_carries_the_second_level():
+    """合成产物里带着两级：一级焦点 + 那些**会概括**的桶的二级。"""
+    from generators import positions as POS
+    from analysis import synthesis as S
+    views, _i = POS.build()
+    syn = S.build(views)
+    assert "second_level" in syn, "产物里没有二级"
+    assert syn["provenance"]["focus_basis"] == "subject"
+    # 换成邻近性依据时二级为空（那个依据下没有可展开的层次）
+    syn2 = S.build(views, focus_basis="reach")
+    assert syn2["second_level"] == []
+    assert syn2["provenance"]["focus_basis"] == "reach"
+
+
 def test_dce_partition_equals_frequency_partition():
     """**这是这一轮最重要的发现，所以钉成断言。**"""
     from checks import ablation

@@ -54,8 +54,15 @@ def build(views, radius: int = 0, focus_basis: str = "subject") -> dict:
     div = D.analyse(views)
     if focus_basis == "subject":
         fx = F.subject_foci(div, "structure")
+        # 二级：一级焦点**内部**的形式概念（多特征 + `Sep` 判据）。
+        # ⚠️ 只带**会概括**的那些桶（`only_if_compresses`）—— 判据是
+        # 「二级概念数 < 桶内记录数」，**结构性的，不是阈值**：
+        # 立场材料上二级只是展开（0.9x），真实语料上它概括（7.7x）。
+        from . import concepts as K
+        lv2 = K.second_level(div, views, only_if_compresses=True)
     elif focus_basis == "reach":
         fx = F.foci(div, radius=radius, views=views)
+        lv2 = []
     else:
         raise ValueError(f"未知的焦点依据 {focus_basis!r}，只认 subject / reach")
 
@@ -87,6 +94,9 @@ def build(views, radius: int = 0, focus_basis: str = "subject") -> dict:
         },
         "divergence": flat,
         "foci": fx,
+        # 二级只在**会概括**的桶上出现。空列表 = 这份材料上二级没意义
+        # （那本身是结论，不是缺省）。
+        "second_level": lv2,
         "provenance": {
             "views": [
                 {"id": v["id"], "source": dict(v["source"]),

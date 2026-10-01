@@ -21,7 +21,8 @@ import sys
 # `scope` 是 §二十 排除项的可执行形式，也是断言。
 # `corpus` 是**反例扫描**：把每条结论拿到一整片配置上撞一遍。
 ASSERT_GROUPS = ("identity", "interference", "scope", "boundary", "realdata",
-                 "positions", "radius", "beta", "approximation", "focus")
+                 "positions", "radius", "beta", "approximation", "focus",
+                 "concepts")
 MEASURE_GROUPS = ("reconstruction", "ablation", "corpus")
 
 
