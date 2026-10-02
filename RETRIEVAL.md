@@ -144,23 +144,31 @@ Mining Contrast Sets*, DMKD 5(3), 2001；另有 Alberta 的课件
 
 **实测（锚点是否都有可读标签）：**
 
-    材料                记录      有内容面
-    立场材料              20        100%
-    countries            252        100%
-    真实语料（Scaffold）   192        **0%**
-    **Perspectrum**  **130,800**     **0%**
+    材料                记录      有内容面（keep_labels 关 / **开**）
+    立场材料              20        100%  /  100%
+    countries            252        100%  /  100%
+    真实语料（Scaffold）   192        **0%**  /  **100%**（36/36）
+    **Perspectrum**  **130,800**     **0%**  /  **100%**（抽查前 120 claim 的 20,230 条记录）
 
-⇒ ⚠️ **能支撑第二步检索的两份材料，恰好都是没有内容面的那两份。**
+⇒ ⚠️ **能支撑第二步检索的两份材料，原先恰好都是没有内容面的那两份。**
 
 **两个原因不同，必须分开：**
 
     **Perspectrum**  是**我自己的省钱决定**造成的 —— 接第一步时我特意跳过了
                      文本池（1.3MB + 7.8MB），理由是「DCE 只看结构、不看文本」。
                      ⚠️ **那个决定对第一步是对的，对第二步是错的。**
-                     可逆：把那两个池下下来即可。
-    **Scaffold 语料** 是 **adapter 的漏洞** —— 源数据的 frontmatter 里**有 `title`**，
-                     而 `adapters/scaffold.py` 没有把它带进 `metadata.labels`。
-                     数据本来有，是映射时丢了。
+    **Scaffold 语料** 源数据 frontmatter 里**有 `title`**，而 adapter 按 `DROP` 的
+                     §七 理由丢掉了它。
+
+⇒ 两个都已修，**都走显式开关、默认不变**：
+
+    `adapters/scaffold.py`    `to_view(..., keep_labels=False)`
+    `adapters/perspectrum.py` `to_views(..., keep_labels=False)` + `load_pools()`
+
+⚠️ **而允许的依据是读出来的，不是猜的**（`LESSONS` §H）：
+`README` 边界一禁的是「**不做任何同名归并**」——那是**身份判断**；
+携带标签不归并身份、不判断同名、不回写源（§2.1 安全）、可追溯到 `source.ref`（§2.2）。
+⚠️ **标签只供检索/显示，绝不进任何比较或排序**（§C9 #5 / §二十）。
 
 ⇒ 这条给出一个**架构性结论**，值得单独记住：
 

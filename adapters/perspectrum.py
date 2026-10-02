@@ -107,19 +107,57 @@ def claims_with_stances(data) -> list:
     return out
 
 
-def to_views(cid: int, clusters: list, votes=None) -> list:
-    """一个 claim 的视角簇 → 一组视图（**每个簇一个视图**）。"""
+def load_pools(directory, which: str = "evidence") -> dict:
+    """读文本池 → `{id: text}`。
+
+    ⚠️ **为什么要它**：第一步只需要结构（id + 关系），而**第二步（检索）需要内容面** ——
+    处境只能映射到标签，映射不到「类型/单元/关系」这些**结构面**。
+    实测：不读文本池时 Perspectrum 的内容面覆盖率是 **0%**。
+
+    池子的字节数与 GitHub API 报的一致时才用（1,297,468 / 7,839,241）。
+    """
+    name, key = (("perspective_pool.json", "pId") if which == "perspective"
+                 else ("evidence_pool.json", "eId"))
+    p = pathlib.Path(directory) / name
+    if not p.is_file():
+        return {}
+    d = json.loads(p.read_text(encoding="utf-8"))
+    return {int(x[key]): (x.get("text") or "").strip() for x in d}
+
+
+def to_views(cid: int, clusters: list, *, claim_text: str = "",
+             ev_text: dict = None, keep_labels: bool = False) -> list:
+    """一个 claim 的视角簇 → 一组视图（**每个簇一个视图**）。
+
+    `keep_labels`（**默认关，保持旧行为**）：把 claim 的正文与 evidence 的正文
+    带进 `metadata["labels"]`，供**第二步当内容面**用。
+
+    ⚠️ 允许的依据与约束同 `adapters/scaffold.py` 的 `keep_labels`：
+    `README` 边界一禁的是**同名归并**（身份判断），不是携带标签；
+    而标签**只供检索/显示，绝不进任何比较或排序**（§C9 #5 / §二十）。
+    """
     claim = f"con-{cid:04d}"
     views = []
     for i, stance, evs in clusters:
         ev_nodes = [f"con-{EVIDENCE_OFFSET + e:04d}" for e in evs]
         rel = SUPPORT if stance == "support" else CONTRADICT
+        meta = None
+        if keep_labels:
+            lab = {}
+            if claim_text.strip():
+                lab[claim] = claim_text.strip()
+            for e, n in zip(evs, ev_nodes):
+                t = (ev_text or {}).get(e, "")
+                if t:
+                    lab[n] = t
+            meta = {"labels": lab} if lab else None
         views.append(V.make_view(
             view_id=f"pcl-{i:04d}",
             source_ref=f"perspectrum://claim/{cid}/perspective/{i}",
             source_kind="human",
             nodes=sorted([claim] + ev_nodes),
             edges=[{"from": n, "to": claim, "relation": rel} for n in ev_nodes],
+            metadata=meta,
         ))
     return views
 
