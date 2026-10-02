@@ -63,13 +63,15 @@ def run_all() -> list:
                 f"{len(rows)} 份材料全部 coverage=1.0 —— "
                 "否则检索永远够不到那些记录" if not bad else f"不符 {bad[:2]}"))
 
-    # ② 不塌：没有任何一个键覆盖**全部**记录
+    # ② 不塌：没有任何一个**闭合键**覆盖全部记录
     #
-    # ⚠️ 判据是**结构性的**（max_key == n_records），不是阈值。
-    # 而这是本仓库栽过一次的形状：焦点机制死于传递闭包。
+    # ⚠️ 判据改过一次。首版问的是「有没有**单值**键覆盖全部」，
+    # 而那在**材料同质**时必然成立（真实语料 192 条全是 omission ⇒
+    # `类型=omission` 覆盖全部）——**那是材料的事实，不是索引的缺陷**。
+    # 现在只在**闭合键**上问，而「塌」的定义是「唯一的键覆盖了全部」。
     collapsed = [(n, s["max_key"], s["n_records"]) for n, s, e in rows
                  if s and s["collapse"]]
-    out.append(("② 不塌：没有任何一个键覆盖全部记录",
+    out.append(("② 不塌：没有任何一个闭合键覆盖全部记录",
                 not collapsed,
                 f"塌掉 {collapsed[:3]}" if collapsed else
                 "全部材料都没有单键全覆盖 —— **这次没有重演焦点那次**"))
@@ -84,6 +86,9 @@ def run_all() -> list:
                           for n, s, e in rows[:4])))
 
     # ④ 确定性：输入逆序不改索引
+    #
+    # ⚠️ 首版用**记录下标**比，于是红的 —— 而变的只是编号，不是内容。
+    # 现在索引存的是**规范身份**（`_rid`），所以逆序不该有任何影响。
     nd = []
     for name, views in _materials():
         try:
@@ -91,11 +96,12 @@ def run_all() -> list:
             b = IX.build(list(reversed(views)))
         except Exception:
             continue
-        ka = sorted((str(k), sorted(v)) for k, v in a["keys"].items())
-        kb = sorted((str(k), sorted(v)) for k, v in b["keys"].items())
+        ka = sorted((str(sorted(k)), sorted(v)) for k, v in a["keys"].items())
+        kb = sorted((str(sorted(k)), sorted(v)) for k, v in b["keys"].items())
         if ka != kb:
             nd.append(name)
-    out.append(("④ 确定性：输入逆序不改索引", not nd, f"不符 {nd[:3]}" if nd else
+    out.append(("④ 确定性：输入逆序不改索引（存的是规范身份，不是下标）",
+                not nd, f"不符 {nd[:3]}" if nd else
                 "全部材料的键与命中集合逐位相同"))
 
     # ⑤ **有内容面与没有内容面，差别要看得见** —— 否则内容面就是白加的
