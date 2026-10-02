@@ -91,19 +91,37 @@ DROP = {
 
 
 def to_view(view_id: str, nodes: list, *, source_ref: str = "scaffold://unknown",
-            source_kind: str = "scaffold") -> Adaptation:
+            source_kind: str = "scaffold", keep_labels: bool = False) -> Adaptation:
     """把一组 Scaffold 形状的节点翻成一个 `Structured View`。
 
     `nodes` 是最小的、只表达「共享结构空间」这个思想的数据：
     每项至少要有 `id` 与 `relations`。其余字段按 `DROP` 丢掉并逐条记账。
+
+    `keep_labels`（**默认关，保持旧行为**）：把源节点的 `title` 带进
+    `metadata["labels"]`，供**第二步（检索）**当「内容面」用。
+
+    ⚠️ **它在既有约束下是允许的，而这一点是读出来的**（`LESSONS` §H 那条规矩）：
+    `README` 边界一禁的是「**不做任何同名归并**」——那是**身份判断**；
+    而携带标签不归并身份、不判断同名、不回写源（§2.1 安全）、
+    可追溯到源节点的 `source.ref`（§2.2 满足）。
+
+    ⚠️ **但有一条必须守死**：标签**只能用于检索/显示，绝不能进任何比较或排序** ——
+    否则就撞 `§C9 #5`（Popularity = Evidence）与 §二十 的权威排序。
+    产物里的禁词扫描是这条的可执行形式。
+
+    ⚠️ 默认关的理由不是"没批准"，而是 `LESSONS` §B 第四条：
+    **新能力走显式参数，默认保持旧行为。**
     """
     ids, edges, dropped_seen = [], [], set()
+    labels = {}
     for n in nodes:
         if not isinstance(n, dict) or "id" not in n:
             raise ValueError(f"Scaffold 节点必须是带 id 的字典，收到 {n!r}")
         nid = n["id"]
         N.check_id(nid)                       # 形状与前缀照抄 Scaffold
         ids.append(nid)
+        if keep_labels and isinstance(n.get("title"), str) and n["title"].strip():
+            labels[nid] = n["title"].strip()
         for other in (n.get("relations") or []):
             N.check_id(other)
             # ⚠️ 无种类 → 本层声明的占位种类，**方向是 Scaffold 的正文约定**，
@@ -127,10 +145,28 @@ def to_view(view_id: str, nodes: list, *, source_ref: str = "scaffold://unknown"
                        # 而那看起来像 adapter 坏了，其实是白名单里没这个词。
                        source_kind=source_kind if source_kind in V.SOURCE_KINDS
                        else "scaffold",
-                       nodes=sorted(have), edges=sorted(set(edges)))
+                       nodes=sorted(have), edges=sorted(set(edges)),
+                       # ⚠️ 标签**只**进 metadata，绝不进任何比较或排序
+                       metadata={"labels": labels} if keep_labels else None)
 
     losses = [f"{k}：{why}" for k, why in DROP.items()
               if any(k in n for n in nodes)]
+    # ⚠️ 标签这一条的**记账要跟着开关走** —— 关着时它仍是一条损失，开着时它不是。
+    n_titled = sum(1 for n in nodes if isinstance(n.get("title"), str)
+                   and n["title"].strip())
+    if keep_labels:
+        losses = [x for x in losses if not x.startswith("title")]
+        losses.append(
+            f"**补上了内容面**：{len(labels)}/{n_titled} 个有 title 的节点带上了标签。"
+            "⚠️ 标签**只供检索/显示，不参与任何比较与排序**（§C9 #5 / §二十）"
+        )
+    elif n_titled:
+        losses.append(
+            f"⚠️ **{n_titled} 个节点的 title 被丢掉了** —— 这是第一步的判据"
+            "（§七 不做 alignment），而**它不适用于第二步**：检索需要一个「内容面」，"
+            "而处境只能映射到标签。要它请显式传 `keep_labels=True`"
+            "（`README` 边界一禁的是**同名归并**，不是携带标签）"
+        )
     if dangling:
         losses.append(f"指向本次未给出的节点、因而被丢掉的引用 {len(dangling)} 条："
                       f"{dangling[:5]}（视图必须是自足子图）")
