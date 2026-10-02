@@ -22,7 +22,7 @@ import sys
 # `corpus` 是**反例扫描**：把每条结论拿到一整片配置上撞一遍。
 ASSERT_GROUPS = ("identity", "interference", "scope", "boundary", "realdata",
                  "positions", "radius", "beta", "approximation", "focus",
-                 "concepts", "nullmodel", "consensus", "countries", "mvp")
+                 "concepts", "nullmodel", "consensus", "countries", "mvp", "perspectrum")
 MEASURE_GROUPS = ("reconstruction", "ablation", "corpus")
 
 
