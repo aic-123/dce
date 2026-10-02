@@ -69,6 +69,12 @@ def materials() -> list:
         from adapters import countries as C
         cv, _ids = C.load_dir(d2)
         out.append(("公开数据（countries）", cv, False))
+    # ⚠️ **Perspectrum 不放进这里。** 它是**逐个 claim 分析**的
+    # （视图 = 该 claim 的视角簇），把 907 个 claim 的视图**并成一个分析**
+    # 是错的 —— `adapters/perspectrum.py` 的 docstring 里写着为什么：
+    # 跨 claim 的节点空间是拼起来的，而一个视角簇只对它自己那个 claim 发言。
+    # 我第一次就并了，结果把检查卡死（规模爆炸）。
+    # 它的结果由 `checks/perspectrum.py` **逐 claim** 算，本文件只读那个数。
     return out
 
 
@@ -107,18 +113,36 @@ def run_all() -> list:
                 "；".join(f"{r['name']} γ={r['gamma']:.4f}（{r['n_units']} 单元，"
                           f"{r['n_classes']} 类）" for r in mine)))
 
-    # ③ ⚠️ **当前状态：S1b 现实性未达成** —— 钉住，并说明反过来会红
+    # ③ ⭐ **S1b 现实性：过线了**（本条原先钉的是「未达成」）
     #
-    # ⚠️ 这条**钉住的是一个未达成的判据**，所以它绿着并不代表过线。
-    # 它绿着的含义是「现状如实记录在案」。一旦某个真材料 γ<1，
-    # 本条会红 —— **那时是好消息，请更新本条与文档。**
+    # ⚠️ 这条**已经按设计翻过一次红**。加 Perspectrum 之前它断言的是
+    # 「真材料上 γ 全 = 1」，并写着「一旦某个真材料 γ<1，本条会红 —— 那是好消息」。
+    # 2026-10-01 它红了：Perspectrum 上 **752 个可分析 claim 里 134 个 γ<1**。
+    # 于是按本仓库的规矩（**钉住缺陷的断言要在修好后同时钉住新状态**）
+    # 把它改成断言**已达成**。
+    #
+    # ⚠️ 而 `countries` 与 Scaffold 语料**仍然 γ=1** —— 这一点没有被这条断言抹掉：
+    # 它们各自的原因写在 `checks/countries.py`（纯嵌套、无分歧）里。
     others = [r for r in rows if not r["authored"]]
-    out.append(("⚠️ S1b 现实性：**判据未达成** —— 真材料上 γ 全 = 1",
-                bool(others) and all(abs(r["gamma"] - 1.0) < 1e-12 for r in others),
-                "；".join(f"{r['name']} γ={r['gamma']:.4f}" for r in others) +
-                " —— **视图层没多区分出任何东西**。"
-                "⚠️ 本条绿着**不代表过线**，只代表现状如实记录；"
-                "**一旦某个真材料 γ<1，本条会红 —— 那是好消息，请更新**"))
+    # Perspectrum 的数是**逐 claim** 算的（见 `checks/perspectrum.py`），
+    # 所以这里读那个结果，而不是把它并进 `rows` 里（并进去会把检查卡死）。
+    from checks import perspectrum as CP
+    pers = None
+    if CP.data_file() is not None:
+        try:
+            pers = CP.measure()
+        except Exception as e:                       # 数据坏掉要**说出来**
+            pers = {"error": str(e)[:60]}
+    ok_s1b = bool([r for r in others if r["gamma"] < 1.0 - 1e-12]) or \
+        bool(pers and pers.get("n_gamma_lt_1", 0) > 0)
+    detail = "；".join(f"{r['name']} γ={r['gamma']:.4f}" for r in others)
+    if pers and "n_gamma_lt_1" in pers:
+        detail += (f"；Perspectrum（逐 claim）**{pers['n_gamma_lt_1']}/"
+                   f"{pers['analysable']} 个 γ<1**，min={pers['gamma_min']:.4f}")
+    out.append(("⭐ S1b 现实性：**非自造材料上有 γ<1** —— MVP 第一步过线",
+                ok_s1b,
+                detail + " —— **至少一份真材料让视图层区分出了"
+                "「并集+频次」区分不出的东西**"))
 
     # ④ **谁挡着路**：只有 pairing 依赖的两类能把 γ 拉下来
     #
