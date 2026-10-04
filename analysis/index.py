@@ -153,3 +153,91 @@ def by_kind(idx: dict) -> dict:
         facet = sorted(k)[0][0].split(":")[0]
         out.setdefault(facet, {})[k] = v
     return out
+
+
+# ── 统计版闭合判据：**测增量，不测总支持度** ──────────────────────────
+#
+# ⚠️ 这一节是对闭合判据的修正，依据是**成熟领域**：
+# **statistically sound pattern discovery / self-sufficient itemsets**（Webb）。
+# （⚠️ 只拿到检索片段，**未核对正文**。见 `RETRIEVAL.md` 末尾。）
+#
+# 原先的「闭合」判据问的是「**有没有**收窄」，成熟做法问的是
+# 「收窄**是否超出随机**」。差别不是修辞：
+#
+#     实测两次（同质的 Scaffold 语料、异质的 Perspectrum）都是
+#     **面数≥2 的键 0 个显著**，而零分布紧得几乎没有余地 ——
+#     因为**总支持度几乎由边际决定**，测它近乎空转。
+#
+# ⇒ 该测的是**从子集到超集那一步的收窄幅度**：
+#
+#     对键 K（面数≥2）取它**支持度最大的真子集** K'（最宽松的父），
+#     令 f = K 减 K'，m = f 的总体支持度，s' = K' 的支持度，n = 记录数。
+#     独立零假设下的期望 E = s' · m / n；观测 s = K 的支持度。
+#     **s 显著小于 E ⟺ 这个面带来了超出随机的收窄。**
+#
+# ⚠️ 统计量用**超几何的正态近似**（均值 E、方差按超几何公式）。
+# **这是近似，不是精确尾概率** —— 记在这里以免它被当成精确值引用。
+# ⚠️ 多重检验校正用 **Holm**，否则一批键里总有几个「显著」。
+
+
+def _norm_sf(z: float) -> float:
+    """标准正态上尾 P(Z >= z)。只用标准库。"""
+    import math
+    return 0.5 * math.erfc(z / math.sqrt(2.0))
+
+
+def productivity(idx: dict, *, alpha: float = 0.05) -> dict:
+    """每个面数≥2 的键的**收窄显著性**，Holm 校正。
+
+    ⚠️ 这里的 p 是**判据**，不是排序键 —— 返回的 `rows` 按 p 升序只为
+    Holm 的逐步过程，**不构成给用户看的排行**。
+    """
+    from itertools import combinations
+    n = len(idx["records"])
+    keys = idx["keys"]
+    marg = {}
+    for k, sel in keys.items():
+        if len(k) == 1:
+            marg[next(iter(k))] = len(sel)
+    rows = []
+    for k, sel in keys.items():
+        if len(k) < 2:
+            continue
+        s = len(sel)
+        best = None
+        for r in range(len(k) - 1, 0, -1):
+            for sub in combinations(sorted(k), r):
+                ss = keys.get(frozenset(sub))
+                if ss is not None and (best is None or len(ss) > best[1]):
+                    best = (frozenset(sub), len(ss))
+            if best is not None:
+                break
+        if best is None:
+            continue
+        parent, sp = best
+        added = next(iter(set(k) - set(parent)))
+        m = marg.get(added, 0)
+        if sp == 0 or m == 0 or n <= 1:
+            continue
+        e = sp * m / n
+        var = sp * (m / n) * (1 - m / n) * (n - sp) / (n - 1)
+        if var <= 0:
+            continue
+        z = (s - e) / (var ** 0.5)
+        rows.append({"key": sorted(k), "observed": s, "expected": e,
+                     "narrowing": e - s, "z": z,
+                     "p": _norm_sf(-z),          # 单侧：收窄才算
+                     "parent": sorted(parent), "added": added})
+    rows.sort(key=lambda r: r["p"])
+    mt = len(rows)
+    stopped = False
+    for i, r in enumerate(rows):
+        r["p_holm"] = min(1.0, r["p"] * (mt - i))
+        if stopped or r["p_holm"] > alpha:
+            r["significant"] = False
+            stopped = True
+        else:
+            r["significant"] = True
+    return {"tested": mt, "significant": sum(1 for r in rows if r["significant"]),
+            "rows": rows, "alpha": alpha,
+            "method": "超几何正态近似 + Holm（**近似，非精确尾概率**）"}
