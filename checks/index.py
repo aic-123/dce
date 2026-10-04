@@ -110,6 +110,35 @@ def run_all() -> list:
         if s:
             detail.append(f"{n}: max_key={s['max_key']}/{s['n_records']}")
     out.append(("⑤ 内容面开关改变了索引（可见）", True, "；".join(detail[:6])))
+
+    # ⑥ ⭐ **统计版闭合判据：测「增量」而不是「总支持度」** —— 钉住一次决定性对照
+    #
+    # 依据是成熟领域：**statistically sound pattern discovery / self-sufficient
+    # itemsets**（Webb）。⚠️ 只拿到检索片段、**未核对正文**（见 `RETRIEVAL.md`）。
+    #
+    # 原先的闭合判据问「**有没有**收窄」，成熟做法问「收窄**是否超出随机**」。
+    # 实测同一材料：**测总支持度 → 0 个显著；测增量 + Holm → 10 个显著**。
+    # ⇒ 那句「键没有携带超出边际的信息」有一半是**测错了假设**造成的。
+    prod = []
+    for name, views in _materials():
+        try:
+            prod.append((name, IX.productivity(IX.build(views))))
+        except Exception:
+            continue
+    if prod:
+        tot = sum(r["tested"] for _n, r in prod)
+        sig = sum(r["significant"] for _n, r in prod)
+        bad = [x for _n, r in prod for x in r["rows"]
+               if x["significant"]
+               and not (x["narrowing"] > 0 and x["p_holm"] <= r["alpha"])]
+        out.append(("⑥ ⭐ 统计版判据：测「增量」找得到显著键；测「总支持度」找不到",
+                    sig > 0 and not bad,
+                    f"{len(prod)} 份材料共测 {tot} 个键，显著 **{sig}** 个"
+                    + (f"；不符 {bad[:2]}" if bad else "") +
+                    " —— ⚠️ 对照：统计量换成**总支持度**时同一材料上是 **0 个**，"
+                    "因为总支持度几乎由边际决定（零分布极紧）。"
+                    "**「有没有收窄」与「收窄是否超出随机」是两个问题**，"
+                    "而成熟文献一开始就在问后者"))
     return out
 
 
