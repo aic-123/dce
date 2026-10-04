@@ -416,3 +416,159 @@ def bipartition_dependent(idx: dict, *, alpha: float = 0.05,
             "filtering": len(dep) != len(minimal),
             "method": "依赖 ⟺ 每个二分都显著（Fisher 精确，双侧取小含并列）；"
                       "只留最小依赖集（correlation rules）"}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# self-sufficient itemsets 的**四条**判据（正文行 2311–2342）
+# ══════════════════════════════════════════════════════════════════════
+#
+# ⚠️ **本节取代上面两个函数**，而它们各自的病灶写在这里，免得被改回去：
+#
+#     `productivity()`        零假设取「给定父的条件独立」，**不是**相互独立
+#     `minimal_dependent()`   最小性是**空判** —— 单面键不可检验
+#                             （一个面时独立期望就是它自己的边际 ⇒ p 恒在 0.5 附近）
+#                             ⇒ 「显著而所有真子集都不」对大小 2 的键恒为真
+#
+# 正文那四条（行 2311–2342）：
+#
+#     ① **productivity**     对**每个二分**都要有显著依赖，用 Fisher 精确
+#     ② **non-redundant**    ∃ Y ⊊ X, Z ⊊ Y : fr(Y) = fr(Z) 就是冗余
+#     ③ **independently productive**
+#                            若有 Y ⊋ X 既 productive 又 non-redundant，
+#                            则 X 要在「**去掉 Y∖X 覆盖的数据**」之后重测 productivity
+#     ④ **最小性**（correlation rules，行 2268）X 依赖而所有真子集都不
+#
+# ⚠️ **一处刻意偏离，必须声明**：
+#
+#     正文行 2311 / 2268 要的是 **positive** dependency（共现比独立**多**）。
+#     而**我的索引键有用恰恰在于它收窄得厉害** —— 那是**负**依赖
+#     （共现比独立**少**）。论文的 dependency set 是「常一起出现的项」，
+#     我的键是「判别性的合取」，**两者方向相反**。
+#
+#     ⇒ 所以 `direction` 是**显式参数**，默认 `"lower"`（收窄），
+#       而引用时**不许**把它说成正文那一条。正文那一条请传 `"upper"`。
+
+
+def _hyper_one_sided(a: int, r1: int, c1: int, n: int, direction: str) -> float:
+    """2×2 表的 Fisher 精确**单侧** p（**含并列**）。
+
+    `"upper"` = 共现比独立**多**（正依赖，正文那一条）；
+    `"lower"` = 共现比独立**少**（收窄，本层要的那一条）。
+
+    ⚠️ 含并列是本仓库在零模型那一轮量出的规矩：不含并列时**两端都会被判「极端」**。
+    """
+    import math
+    if n <= 0:
+        return 1.0
+    lo = max(0, r1 + c1 - n)
+    hi = min(r1, c1)
+
+    def pmf(x: int) -> float:
+        return (math.comb(r1, x) * math.comb(n - r1, c1 - x)) / math.comb(n, c1)
+
+    if direction == "upper":
+        return min(1.0, sum(pmf(x) for x in range(a, hi + 1)))
+    if direction == "lower":
+        return min(1.0, sum(pmf(x) for x in range(lo, a + 1)))
+    raise ValueError(f"direction 只认 upper / lower，收到 {direction!r}")
+
+
+def _sel(key, per) -> frozenset:
+    return frozenset(i for i, fs in enumerate(per) if set(key) <= fs)
+
+
+def _bip_p(key, per, n, direction) -> float:
+    """一个集合**所有二分**里**最差**的那个 p。"""
+    from itertools import combinations
+    ks = sorted(key)
+    worst = 0.0
+    for r in range(1, len(ks) // 2 + 1):
+        for left in combinations(ks, r):
+            right = tuple(sorted(set(ks) - set(left)))
+            if not right:
+                continue
+            A, B = _sel(left, per), _sel(right, per)
+            worst = max(worst, _hyper_one_sided(len(A & B), len(A), len(B), n,
+                                                direction))
+    return worst
+
+
+def _productive(key, per, n, alpha, direction, allowed=None) -> bool:
+    """① productivity：每个二分都显著。`allowed` 限定可用的记录（给③用）。"""
+    if len(key) < 2:
+        return False
+    if allowed is not None:
+        keep = set(allowed)
+        per2 = [(fs if i in keep else frozenset())
+                for i, fs in enumerate(per)]
+        n2 = len(keep)
+        if n2 == 0:
+            return False
+    else:
+        per2, n2 = per, n
+    return _bip_p(key, per2, n2, direction) <= alpha
+
+
+def _redundant(key, per) -> bool:
+    """② non-redundant 的反面：`∃ Y ⊊ X, Z ⊊ Y : fr(Y) = fr(Z)`（行 2320）。"""
+    from itertools import combinations
+    ks = sorted(key)
+    for rY in range(2, len(ks) + 1):
+        for Y in combinations(ks, rY):
+            fy = _sel(Y, per)
+            for rZ in range(1, rY):
+                for Z in combinations(Y, rZ):
+                    if _sel(Z, per) == fy:
+                        return True
+    return False
+
+
+def self_sufficient(idx: dict, *, alpha: float = 0.05, max_size: int = 3,
+                    direction: str = "lower") -> dict:
+    """①②③④ 一起。返回被留的集合与**每一条判据各淘汰了多少**。
+
+    ⚠️ `direction` 默认 `"lower"`（收窄）是**刻意的偏离**，见本节标题下的声明。
+    """
+    from itertools import combinations
+    per = idx["per_record"]
+    n = len(per)
+    allf = sorted({f for s in per for f in s})
+    cand = [frozenset(c) for k in range(2, max_size + 1)
+            for c in combinations(allf, k)]
+    # ① productivity
+    prod = [k for k in cand if _productive(k, per, n, alpha, direction)]
+    # ② non-redundant
+    nonred = [k for k in prod if not _redundant(k, per)]
+    # ④ 最小性（真子集里没有已经 productive 的）
+    pset = set(prod)
+    minimal = [k for k in nonred
+               if not any(frozenset(o) < k for o in pset)]
+    # ③ independently productive：对每个 productive+nonredundant 的**真超集** Y，
+    #    去掉 Y∖X 覆盖的数据后重测
+    kept, dropped3 = [], 0
+    for k in minimal:
+        sups = [y for y in nonred if y > k]
+        ok = True
+        for y in sups:
+            extra = set(y) - set(k)
+            excl = _sel(extra, per)
+            allowed = [i for i in range(n) if i not in excl]
+            if not _productive(k, per, n, alpha, direction, allowed=allowed):
+                ok = False
+                break
+        if ok:
+            kept.append(k)
+        else:
+            dropped3 += 1
+    # 哪一步淘汰了多少 —— 这是判据各自的账，不能只报最终数
+    counts = {"候选": len(cand), "① productivity 后": len(prod),
+              "② non-redundant 后": len(nonred),
+              "④ 最小性后": len(minimal), "③ 之后": len(kept)}
+    return {"kept": sorted(kept, key=lambda k: sorted(k)), "n_kept": len(kept),
+            "dropped_by_3": dropped3, "counts": counts,
+            "alpha": alpha, "max_size": max_size, "direction": direction,
+            "declared_deviation": None if direction == "upper" else
+            "direction=lower 是**刻意的偏离**：正文要 positive dependency，"
+            "而索引键有用在于**收窄**（负依赖）。引用时不许把它说成正文那一条。",
+            "method": "self-sufficient itemsets：productivity ∧ non-redundant ∧ "
+                      "最小性 ∧ independently productive（Fisher 精确，含并列）"}

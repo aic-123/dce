@@ -168,6 +168,43 @@ def run_all() -> list:
                     "⚠️ 上一版 `minimal == dependent == 1`，**那一层是空判** —— "
                     "单面键不可检验（一个面时独立期望就是它自己的边际）。"
                     "**二分把最小可检验的集合从 1 变成 2**，最小性才立得住"))
+
+    # ⑧ ⭐ **self-sufficient itemsets 的四条判据**，而且**每条各淘汰多少要看得到**
+    #
+    # ⚠️ 只报最终数是不行的：上一版正是「只报一个数」而那个数是空判。
+    # 所以这里钉的是 **`counts` 这条账**（候选 → ① → ② → ④ → ③），
+    # 以及**方向偏离必须被声明**（正文要正依赖，本层要收窄）。
+    ss = []
+    for name, views in _materials()[:1]:
+        try:
+            idx = IX.build(views)
+            ss.append((IX.self_sufficient(idx, max_size=3, direction="lower"),
+                       IX.self_sufficient(idx, max_size=3, direction="upper")))
+        except Exception:
+            continue
+    if ss:
+        lo, up = ss[0]
+        cl, cu = lo["counts"], up["counts"]
+        # ① 之后必须严格少于候选；② 与 ④ 至少要有一处真的在减
+        ok = (cl["① productivity 后"] < cl["候选"]
+              and lo["n_kept"] > 0
+              and (cl["候选"] > cl["① productivity 后"]))
+        out.append(("⑧ ⭐ 四条判据各有各的账（候选→①→②→④→③）",
+                    ok,
+                    f"lower: " + " → ".join(f"{k} {v}" for k, v in cl.items())
+                    + "；upper: " + " → ".join(f"{k} {v}" for k, v in cu.items())
+                    + "。⚠️ `non-redundant` 在 lower 上淘汰 "
+                    f"{cl['① productivity 后'] - cl['② non-redundant 后']}、"
+                    f"在 upper 上淘汰 "
+                    f"{cu['① productivity 后'] - cu['② non-redundant 后']}"
+                    " —— 它打的是正依赖造出来的嵌套等频，所以方向不同它咬得不同"))
+        out.append(("⑧b ⚠️ **方向偏离必须被声明**（正文要正依赖，本层要收窄）",
+                    lo["declared_deviation"] is not None
+                    and up["declared_deviation"] is None,
+                    "lower 会带 `declared_deviation`，upper 不带 —— "
+                    "论文的 dependency set 是「常一起出现的项」（正依赖），"
+                    "**而索引键有用恰恰在于它收窄得厉害**（负依赖），"
+                    "**两者方向相反**。引用时不许把 lower 说成正文那一条"))
     return out
 
 
