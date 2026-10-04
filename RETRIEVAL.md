@@ -243,6 +243,54 @@ emoving uninformative variations 就是我那个闭合判据想干的事 —— 
        productivity / non-redundancy 判据与我手搓的闭合判据关系最直接，
        应当优先补读
 
+### ✅✅ **正文读到了** —— 而它给出三处具体更正
+
+**办法**：不走 `web_fetch`（30 秒上限，51 页必超时），改用 `curl.exe` 取
+**arXiv 的 TeX 源码**（274,799 字节）→ 纯文本、带公式、可本地 grep。
+`arxiv.org/src/1709.03904` → `sspdtutarxiv.tex`。
+
+**三处更正（都带正文行号，可复核）：**
+
+**一、productivity 的比对对象**（行 1968）
+
+    原文：productive, if P(A|X) > P(A|Y) for all Y ⊊ X
+
+⚠️ 是**所有真子集**，而我只比对了**最宽的那个父**。
+
+**二、该用的检验**（行 1981、1514、1855）
+
+    assume fr(Y), fr(Y∪Q), fr(Y∪A) fixed, which leads to the hypergeometric
+    model. The corresponding test is **Fisher's exact test for conditional
+    independence**
+
+且行 1855：「Fisher's exact test is **always a safe** [choice]」。
+⚠️ 我用的是**超几何的正态近似**，不是 Fisher 精确检验。
+（行 1532 提到有 accurate approximation 可用于加速 —— 要留近似就得留那一种，
+不是我随手写的那个。）
+
+**三、self-sufficient itemsets 是三条判据，不是一条**（行 2311–2341）
+
+    …formalized as a test for **productivity** … In addition, self-sufficient
+    itemsets have **two additional criteria: they have to be non-redundant
+    and independently productive**.
+
+⚠️ 我只做了第一条的一个变体。
+
+⇒ **所以那 323 个「显著键」按这个领域的标准是偏多的** —— 正文行 2761 正是
+预警这件事：「the discovered rules and sets are likely to be dominated by many
+**superfluous or redundant** [itemsets]」。
+
+**一处对上了**：多重校正那条，正文行 2540 给的
+`Holm-Bonferroni & FWER & k = min(i) : p_{i+1} > α/(m−i)` 与我实现的
+`p × (m − i)` 逐步收紧**是同一个东西**。
+
+    ⬜ **下一步**：productivity 改成对**所有真子集**比对、检验换成
+       **Fisher 精确检验**、补上 **non-redundant** 与 **independently productive**
+       —— 然后重测，看 323 掉到多少
+    ⚠️ 三条一旦落地，「显著键」的含义就变了，断言要跟着改
+
+---
+
 ## ✅ 成熟方案：这个领域是有的，而且它说的正是该测什么
 
 ⚠️ **只有检索片段，未核对正文**（下面几条的来源都是 PDF 或付费页）：
