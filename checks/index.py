@@ -205,6 +205,33 @@ def run_all() -> list:
                     "论文的 dependency set 是「常一起出现的项」（正依赖），"
                     "**而索引键有用恰恰在于它收窄得厉害**（负依赖），"
                     "**两者方向相反**。引用时不许把 lower 说成正文那一条"))
+    # ⑨ ⭐⭐ **充分性**：证到了什么、没证到什么 —— **两件事都要钉**
+    #
+    # 目标（用户收窄后）：**证明视图本身足够支撑检索**，不需要外部输入；
+    # 「压成几张抽象视图」是**后续层**的事。
+    # ⚠️ 而这里有个绝不能混的区别：
+    #     **索引**（面合取 → 记录）覆盖 **1.0**        ← 充分
+    #     **统计筛选后的子集**只覆盖 **33-67%**        ← 不充分
+    # 「索引充分」的数字**不能**拿来支持「筛选结果充分」—— 两个命题。
+    suf = []
+    for name, views in _materials()[:1]:
+        idx = IX.build(views)
+        kept = IX.self_sufficient(idx, max_size=3, direction="lower")
+        cov = set()
+        for kk in kept["kept"]:
+            cov |= {i for i, fs in enumerate(idx["per_record"]) if set(kk) <= fs}
+        n = len(idx["per_record"])
+        suf.append((name, IX.stats(idx)["coverage"], len(cov) / max(1, n)))
+    if suf:
+        name, cov_all, cov_kept = suf[0]
+        out.append(("⑨ ⭐⭐ 充分性：索引覆盖 1.0，而**筛选后的子集不够**",
+                    abs(cov_all - 1.0) < 1e-12 and cov_kept < 1.0,
+                    f"{name}：索引覆盖 **{cov_all:.0%}** —— **视图本身够用**，"
+                    "且面全部来自视图、无外部输入；而统计筛选后留下的键"
+                    f"只覆盖 **{cov_kept:.0%}**。"
+                    "**「索引充分」不能拿来支持「筛选结果充分」** —— "
+                    "那是两个命题，要用筛选后的子集就得先接受那个覆盖面，"
+                    "而那是**设计取舍，不是实现缺陷**"))
     return out
 
 
