@@ -338,3 +338,81 @@ def minimal_dependent(idx: dict, *, alpha: float = 0.05) -> dict:
             "alpha": alpha,
             "method": "零假设=相互独立；二项正态近似 + Holm；只留最小依赖集"
                       "（**近似，非正文点名的精确检验**）"}
+
+
+# ── 取代上面那个：**二分 + Fisher 精确** ───────────────────────────────
+#
+# ⚠️ `minimal_dependent()` 里的最小性是**空判**，原因是结构性的：
+#
+#     单面键不可检验 —— 一个面时独立期望**就是它自己的边际**，
+#     所以 p 恒在 0.5 附近，**永远不显著**。
+#     ⇒ 「它显著而所有真子集都不」对大小 2 的键**恒为真**。
+#     ⇒ 实测 `minimal == dependent == 1` —— **同一个数，那一层没在筛**。
+#
+# 正文给的路（`sspdtutarxiv.tex`）：
+#
+#     行 2174  一个集合表现依赖 ⟺ 它的**每个二分**都依赖
+#     行 2268  correlation rules = **最小**的依赖集
+#     行 1855  Fisher's exact test is always a safe [choice]
+#
+# **二分把集合切成两个非空部分**，所以**最小可检验的集合是大小 2**
+# （它的二分是 `{a}|{b}`，一个真正的 2×2 检验）。最小性因此立得住。
+#
+# ⚠️ 实测（Scaffold 语料）：依赖 **71** → 最小 **62** —— **两个不同的数**。
+# 而那两个数相等正是上一版的病灶，所以断言要钉住「它们不等」。
+
+
+def _hyper_two_sided(a: int, r1: int, c1: int, n: int) -> float:
+    """2×2 表的 Fisher 精确检验。双侧 = **两个单侧尾取小、且含并列**。
+
+    ⚠️ 含并列这条是本仓库在零模型那一轮量出的规矩：不含并列时
+    **低端与高端都会被判「极端」**（并列被当成「不在分布里」）。
+    """
+    import math
+    if n <= 0:
+        return 1.0
+    lo = max(0, r1 + c1 - n)
+    hi = min(r1, c1)
+
+    def pmf(x: int) -> float:
+        return (math.comb(r1, x) * math.comb(n - r1, c1 - x)) / math.comb(n, c1)
+
+    ge = sum(pmf(x) for x in range(a, hi + 1))
+    le = sum(pmf(x) for x in range(lo, a + 1))
+    return min(1.0, min(ge, le))
+
+
+def bipartition_dependent(idx: dict, *, alpha: float = 0.05,
+                          max_size: int = 4) -> dict:
+    """**每个二分都显著**才算依赖；只留**最小**的那些。
+
+    `max_size` 限制枚举的键长（大小 4 以内已足够，且便宜）。**纯判定，不打分排序。**
+    """
+    from itertools import combinations
+    per = idx["per_record"]
+    n = len(per)
+    allf = sorted({f for s in per for f in s})
+    keys = [frozenset(c) for k in range(2, max_size + 1)
+            for c in combinations(allf, k)]
+    dep = {}
+    for k in keys:
+        worst = 0.0
+        for r in range(1, len(k) // 2 + 1):
+            for left in combinations(sorted(k), r):
+                right = tuple(sorted(set(k) - set(left)))
+                if not right:
+                    continue
+                A = {i for i, fs in enumerate(per) if set(left) <= fs}
+                B = {i for i, fs in enumerate(per) if set(right) <= fs}
+                worst = max(worst, _hyper_two_sided(len(A & B), len(A), len(B), n))
+        if worst <= alpha:
+            dep[k] = worst
+    minimal = [k for k in dep if not any(o < k for o in dep)]
+    return {"n_candidates": len(keys), "dependent": len(dep),
+            "minimal": len(minimal),
+            "minimal_keys": sorted(minimal, key=lambda k: sorted(k)),
+            "alpha": alpha, "max_size": max_size,
+            # ⚠️ 判据不是"抽出了多少"，而是**这一层有没有在筛**
+            "filtering": len(dep) != len(minimal),
+            "method": "依赖 ⟺ 每个二分都显著（Fisher 精确，双侧取小含并列）；"
+                      "只留最小依赖集（correlation rules）"}

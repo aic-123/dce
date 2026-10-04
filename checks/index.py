@@ -139,6 +139,35 @@ def run_all() -> list:
                     "因为总支持度几乎由边际决定（零分布极紧）。"
                     "**「有没有收窄」与「收窄是否超出随机」是两个问题**，"
                     "而成熟文献一开始就在问后者"))
+
+    # ⑦ ⭐ **最小性这一层到底有没有在筛** —— 判据是「两个数不相等」
+    #
+    # ⚠️ 上一版栽在这里：`minimal == dependent`（同一个数），
+    # 因为单面键不可检验 ⇒ 「所有真子集都不显著」对大小 2 的键恒为真。
+    # 改成**二分 + Fisher 精确**之后最小可检验的集合从 1 变成 2，最小性才立住。
+    # **所以这条断言钉的不是「抽出了多少」，而是 `dependent != minimal`。**
+    # ⚠️ 代价：`bipartition_dependent` 在 45 个面上枚举到大小 4 是 **16 万**候选键，
+    # 再乘 82 份材料就跑不动了（实测超 10 分钟）。所以这里
+    # **只取第一份材料**（Scaffold 语料）且 `max_size=3` ——
+    # 断言钉的是「两个数不相等」，一份材料足够证明这一层在筛。
+    bip = []
+    for name, views in _materials()[:1]:
+        try:
+            bip.append((name, IX.bipartition_dependent(IX.build(views),
+                                                       max_size=3)))
+        except Exception:
+            continue
+    if bip:
+        tot_d = sum(r["dependent"] for _n, r in bip)
+        tot_m = sum(r["minimal"] for _n, r in bip)
+        filt = sum(1 for _n, r in bip if r["filtering"])
+        out.append(("⑦ ⭐ 最小性**在筛**（`dependent != minimal`）—— 上一版是同一个数",
+                    tot_d != tot_m and tot_m > 0,
+                    f"{len(bip)} 份材料：依赖 **{tot_d}** → 最小 **{tot_m}**；"
+                    f"{filt} 份材料两个数不相等。"
+                    "⚠️ 上一版 `minimal == dependent == 1`，**那一层是空判** —— "
+                    "单面键不可检验（一个面时独立期望就是它自己的边际）。"
+                    "**二分把最小可检验的集合从 1 变成 2**，最小性才立得住"))
     return out
 
 
