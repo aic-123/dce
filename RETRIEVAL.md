@@ -199,6 +199,50 @@ Perspectrum，24 个记录最多的 claim（四类分歧都可能出现）：
 这里「支持度由边际决定」）。**两条独立测量互相印证。**
 
 ---
+
+### ✅ 而摘要读到了 —— 上面那几条里最要紧的一条已从「片段」升成「**摘要已读**」
+
+⚠️ **更正一个我自己的坏习惯**：我原先给这几条一律标「只有检索片段、未核对正文」，
+而**我没有真去试**就假定了抓不到。实测：
+
+    Springer 文章页      → 跨域重定向到 idp.springer.com，**确实拦住了**（这段是真的）
+    **arXiv 有预印版**    → 1709.03904，**摘要页一读就通**（HTTP 200）
+    arXiv 的 HTML 全文    → 51 页，**抓取超时**（不是抓不到，是超出窗口）
+
+⇒ 所以精确的标注是：**摘要 = 读了正文的一部分；正文 = 未读**。
+
+**Hämäläinen & Webb, arXiv:1709.03904v4**（51 页，DMKD 论文的预印版，
+作者注：此版保留了发表版被改动的数学记号）。摘要原文：
+
+> application of appropriate statistical tests allows **precise control over the risk
+> of false discoveries** …
+> Statistical tests can also be applied to **filter out patterns that are unlikely to be
+> useful, removing uninformative variations of the key patterns** in the data.
+> We concentrate on two general classes of patterns: **dependency rules** … and
+> **dependency sets** that express mutual dependence between set elements.
+> We clarify **alternative interpretations of statistical dependence** and introduce
+> appropriate tests for evaluating statistical significance of patterns in different situations.
+> We also introduce special techniques for **controlling the likelihood of spurious
+> discoveries when multitudes of patterns are evaluated**.
+
+⚠️ **这几句对我这一轮做的事有直接判定**：
+
+    
+emoving uninformative variations 就是我那个闭合判据想干的事 —— 成熟版**用统计做**
+    lternative interpretations of statistical dependence
+      —— **这句直接点名我的错**：我挑了一个零假设（对**总支持度**做边际独立）
+         就去测，而这个领域明说统计依赖有**多种解释**，要按情形选对那一个
+    multitudes of patterns —— **多重检验校正**，我加的 Holm 正对应这一条
+
+⇒ 所以这一轮那个修正（**测增量而不是总支持度**）**方向是对的**，
+而它现在有了出处，不再只是「我照检索片段推的」。
+
+    ⬜ **正文仍未读**：51 页的 HTML 超时。要读得换路（PDF 抓不了；
+       或分段取 HTML；或找 r5iv 渲染）
+    ⬜ 而 self-sufficient itemsets（Webb）那一条**仍只有片段** —— 它讲的
+       productivity / non-redundancy 判据与我手搓的闭合判据关系最直接，
+       应当优先补读
+
 ## ✅ 成熟方案：这个领域是有的，而且它说的正是该测什么
 
 ⚠️ **只有检索片段，未核对正文**（下面几条的来源都是 PDF 或付费页）：
