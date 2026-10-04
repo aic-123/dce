@@ -241,3 +241,100 @@ def productivity(idx: dict, *, alpha: float = 0.05) -> dict:
     return {"tested": mt, "significant": sum(1 for r in rows if r["significant"]),
             "rows": rows, "alpha": alpha,
             "method": "超几何正态近似 + Holm（**近似，非精确尾概率**）"}
+
+
+# ── 按正文重写：**最小依赖集**（correlation rules） ────────────────────
+#
+# ⚠️ 上面那个 `productivity()` 是**按错误的那一节**做的，这一节是对它的更正。
+# 依据是正文（`arxiv.org/src/1709.03904` → `sspdtutarxiv.tex`）：
+#
+#     行 2268  Correlation rules are defined as **minimal** sets X, where X
+#              expresses mutual dependence … **but all Y ⊊ X express mutual
+#              independence**.        （Brin/Motwani/Silverstein）
+#     行 2218  候选集的零假设是**所有属性之间的相互独立**
+#     行 2174  一个集合表现依赖 ⟺ 它的**每个二分**都依赖
+#     行 2237  对相互独立的零假设用**二项检验**
+#
+# ⇒ 三处与 `productivity()` 不同：
+#
+#     **零假设**   相互独立（不是"给定父的条件独立"）
+#     **方向**     相互独立下期望支持度 = n·Π(m_i/n)（边际之**积**），
+#                  **观测显著更低**才是依赖 —— 与"收窄"同向，但基准不同
+#     **取舍**     只留**最小**的：它显著，而**所有真子集都不显著**
+#
+# ⚠️ 统计量：正文点名的是**二项检验**（行 2237）。这里用**二项的正态近似**
+# （带连续性校正）—— n 最大约 1500、键数上千，精确尾在纯标准库下太慢。
+# **这是近似，不是正文点名的那三种精确检验之一**，记在这里以免被当精确值引用。
+
+
+def _binom_le(k: int, n: int, p: float) -> float:
+    """`P(X <= k)`，`X ~ Binomial(n, p)` 的**正态近似**（带连续性校正）。"""
+    import math
+    if n <= 0:
+        return 1.0
+    mu = n * p
+    var = n * p * (1.0 - p)
+    if var <= 0:
+        return 1.0 if k >= mu else 0.0
+    z = (k + 0.5 - mu) / math.sqrt(var)
+    return 0.5 * math.erfc(-z / math.sqrt(2.0))
+
+
+def minimal_dependent(idx: dict, *, alpha: float = 0.05) -> dict:
+    """**最小依赖集**：键显著依赖，而它的**所有真子集都不**。
+
+    零假设是键内部**相互独立**。返回 `{tested, dependent, minimal, rows, ...}`。
+    ⚠️ `p` 是判据不是排序键；`rows` 按 p 升序只为 Holm 的逐步过程。
+    """
+    from itertools import combinations
+    n = len(idx["records"])
+    keys = idx["keys"]
+    marg = {}
+    for k, sel in keys.items():
+        if len(k) == 1:
+            marg[next(iter(k))] = len(sel)
+    if n == 0:
+        return {"tested": 0, "dependent": 0, "minimal": 0, "rows": [],
+                "alpha": alpha, "method": "二项正态近似 + Holm（**近似**）"}
+    ps = {}
+    for k, sel in keys.items():
+        if len(k) < 2:
+            continue
+        prod = 1.0
+        ok = True
+        for f in k:
+            m = marg.get(f)
+            if not m:
+                ok = False
+                break
+            prod *= m / n
+        if not ok or prod <= 0:
+            continue
+        ps[k] = _binom_le(len(sel), n, prod)
+    # Holm：先对全部被检键校正（正文行 2540 的逐步法）
+    ordered = sorted(ps.items(), key=lambda kv: kv[1])
+    mt = len(ordered)
+    holm, stopped = {}, False
+    for i, (k, p) in enumerate(ordered):
+        ph = min(1.0, p * (mt - i))
+        holm[k] = ph
+        if stopped or ph > alpha:
+            stopped = True
+    # 最小性：显著依赖，而**所有真子集都不显著**
+    rows, minimal = [], []
+    for k, _p in ordered:
+        if holm[k] > alpha:
+            continue
+        subs_sig = [s for r in range(1, len(k))
+                    for s in combinations(sorted(k), r)
+                    if holm.get(frozenset(s), 1.0) <= alpha]
+        rows.append({"key": sorted(k), "p": ps[k], "p_holm": holm[k],
+                     "dependent_subsets": len(subs_sig),
+                     "minimal": not subs_sig})
+        if not subs_sig:
+            minimal.append(k)
+    return {"tested": mt, "dependent": len(rows), "minimal": len(minimal),
+            "rows": rows, "minimal_keys": sorted(minimal, key=lambda k: sorted(k)),
+            "alpha": alpha,
+            "method": "零假设=相互独立；二项正态近似 + Holm；只留最小依赖集"
+                      "（**近似，非正文点名的精确检验**）"}
