@@ -122,7 +122,7 @@ def run_all() -> list:
     prod = []
     for name, views in _materials():
         try:
-            prod.append((name, IX.productivity(IX.build(views))))
+            prod.append((name, IX.productivity_wrong_null(IX.build(views))))
         except Exception:
             continue
     if prod:

@@ -186,11 +186,19 @@ def _norm_sf(z: float) -> float:
     return 0.5 * math.erfc(z / math.sqrt(2.0))
 
 
-def productivity(idx: dict, *, alpha: float = 0.05) -> dict:
-    """每个面数≥2 的键的**收窄显著性**，Holm 校正。
+def productivity_wrong_null(idx: dict, *, alpha: float = 0.05) -> dict:
+    """⚠️ **零假设取错的对照实现**，保留是为了让那个错留档。
 
-    ⚠️ 这里的 p 是**判据**，不是排序键 —— 返回的 `rows` 按 p 升序只为
-    Holm 的逐步过程，**不构成给用户看的排行**。
+    它问的是「**给定父**的条件独立」下的收窄 —— 而正文问的是
+    「集合内部**相互独立**」（行 2218），并要 **positive** 依赖（行 2311）。
+    **它是错的**，且用超几何的**正态近似**。
+
+    保留的理由：`checks/index.py` 的 ⑥ 用它钉住一次对照 ——
+    **同一个材料上「测总支持度 → 0 个；测增量（错零假设）→ 10 个」**，
+    而改正后的 `self_sufficient()` 给的是第三个不同的数。
+    **三个数各不相同，才说明这条路是一步步修对的，不是一次蒙对。**
+
+    ⚠️ **不要在新代码里调它。** 要判据请用 `self_sufficient()`。
     """
     from itertools import combinations
     n = len(idx["records"])
@@ -267,77 +275,23 @@ def productivity(idx: dict, *, alpha: float = 0.05) -> dict:
 # **这是近似，不是正文点名的那三种精确检验之一**，记在这里以免被当精确值引用。
 
 
-def _binom_le(k: int, n: int, p: float) -> float:
-    """`P(X <= k)`，`X ~ Binomial(n, p)` 的**正态近似**（带连续性校正）。"""
-    import math
-    if n <= 0:
-        return 1.0
-    mu = n * p
-    var = n * p * (1.0 - p)
-    if var <= 0:
-        return 1.0 if k >= mu else 0.0
-    z = (k + 0.5 - mu) / math.sqrt(var)
-    return 0.5 * math.erfc(-z / math.sqrt(2.0))
 
 
-def minimal_dependent(idx: dict, *, alpha: float = 0.05) -> dict:
-    """**最小依赖集**：键显著依赖，而它的**所有真子集都不**。
+# 这里原有一个 `minimal_dependent()`，**已删**。它记着一种错法：
+#
+#     「显著依赖」用**二项正态近似**测**总支持度**；而单面键**不可检验**
+#     （一个面时独立期望就是它自己的边际）=> 最小性**空判**
+#     => 实测 `minimal == dependent == 1` —— **同一个数**。
+#
+# 取代它的是 `bipartition_dependent()` 与 `self_sufficient()`：
+# **最小可检验的集合从 1 变成 2**（二分 `{a}|{b}` 是真正的 2x2 检验）。
+#
+# 之所以**删而不是留**：它的错法已经写在三处（本注释、`RETRIEVAL.md`、
+# 断言 7 的消息里），而**看起来可调用的死代码比一条注释更危险** ——
+# 下一个读代码的人会以为它还是那条路。它的辅助 `_binom_le()` 也随之删了。
 
-    零假设是键内部**相互独立**。返回 `{tested, dependent, minimal, rows, ...}`。
-    ⚠️ `p` 是判据不是排序键；`rows` 按 p 升序只为 Holm 的逐步过程。
-    """
-    from itertools import combinations
-    n = len(idx["records"])
-    keys = idx["keys"]
-    marg = {}
-    for k, sel in keys.items():
-        if len(k) == 1:
-            marg[next(iter(k))] = len(sel)
-    if n == 0:
-        return {"tested": 0, "dependent": 0, "minimal": 0, "rows": [],
-                "alpha": alpha, "method": "二项正态近似 + Holm（**近似**）"}
-    ps = {}
-    for k, sel in keys.items():
-        if len(k) < 2:
-            continue
-        prod = 1.0
-        ok = True
-        for f in k:
-            m = marg.get(f)
-            if not m:
-                ok = False
-                break
-            prod *= m / n
-        if not ok or prod <= 0:
-            continue
-        ps[k] = _binom_le(len(sel), n, prod)
-    # Holm：先对全部被检键校正（正文行 2540 的逐步法）
-    ordered = sorted(ps.items(), key=lambda kv: kv[1])
-    mt = len(ordered)
-    holm, stopped = {}, False
-    for i, (k, p) in enumerate(ordered):
-        ph = min(1.0, p * (mt - i))
-        holm[k] = ph
-        if stopped or ph > alpha:
-            stopped = True
-    # 最小性：显著依赖，而**所有真子集都不显著**
-    rows, minimal = [], []
-    for k, _p in ordered:
-        if holm[k] > alpha:
-            continue
-        subs_sig = [s for r in range(1, len(k))
-                    for s in combinations(sorted(k), r)
-                    if holm.get(frozenset(s), 1.0) <= alpha]
-        rows.append({"key": sorted(k), "p": ps[k], "p_holm": holm[k],
-                     "dependent_subsets": len(subs_sig),
-                     "minimal": not subs_sig})
-        if not subs_sig:
-            minimal.append(k)
-    return {"tested": mt, "dependent": len(rows), "minimal": len(minimal),
-            "rows": rows, "minimal_keys": sorted(minimal, key=lambda k: sorted(k)),
-            "alpha": alpha,
-            "method": "零假设=相互独立；二项正态近似 + Holm；只留最小依赖集"
-                      "（**近似，非正文点名的精确检验**）"}
+
+
 
 
 # ── 取代上面那个：**二分 + Fisher 精确** ───────────────────────────────
