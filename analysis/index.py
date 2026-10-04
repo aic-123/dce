@@ -76,21 +76,38 @@ def _rid(record) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def facets_of(record, views) -> list:
-    """一条差异记录的全部「面=值」。
+def facets_of(record, views, *, content_in_key: bool = False) -> list:
+    """一条差异记录的「面=值」。**默认只给结构面。**
 
-    **结构面**：`类型 / 单元 / 关系 / 角色 / 视图`（`analysis/concepts.py`）。
-    **内容面**：锚点的可读标签 —— **只有适配器显式开了 `keep_labels` 才有**。
+    ⚠️ **内容面默认不进键** —— 这一条是跑 Perspectrum 时撞出来的设计更正：
+
+        内容面原先按「**每个节点的标签**一个面」来算。Scaffold 语料 45 个面
+        （`C(45,3)` 量级，15,180 个候选，跑得动）；而 Perspectrum 一个 claim
+        有 100+ 个 evidence ⇒ **100+ 个面** ⇒ `C(160,3)` 量级 ⇒ **枚举爆炸**。
+
+    **根因**：面数随**节点数**增长，而合取枚举是面数的组合数 ⇒ 必然爆。
+
+    而正确的设计一直写在 `RETRIEVAL.md` 里：
+
+        检索单元 = 一个「面合取」+ **它选中的那批差异记录**
+
+    ⇒ **内容是「载荷」，不是「键」。** 键只用**结构面**
+    （词表有限 ⇒ 面数有界），内容跟着**命中的记录**返回。
+    这一改同时解掉：① 枚举爆炸；② 内容面与结构面重复表达同一信息
+    （那个看着像同义反复的键，本来就该二者留一）。
+
+    `content_in_key=True` 保留旧行为，**只为对照**（它会爆）。
     """
     from analysis import concepts as K
-    from analysis import focus as F
     out = [(f"结构:{a}", a) for a in K.features(record, views)]
-    lab = {}
-    for v in views:
-        lab.update((v.get("metadata") or {}).get("labels", {}))
-    for a in F.anchors(record):
-        if a in lab:
-            out.append(("内容:标签", lab[a]))
+    if content_in_key:
+        from analysis import focus as F
+        lab = {}
+        for v in views:
+            lab.update((v.get("metadata") or {}).get("labels", {}))
+        for a in F.anchors(record):
+            if a in lab:
+                out.append(("内容:标签", lab[a]))
     return sorted(set(out))
 
 
