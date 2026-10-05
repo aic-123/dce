@@ -133,12 +133,27 @@ def run_all() -> list:
             pers = CP.measure()
         except Exception as e:                       # 数据坏掉要**说出来**
             pers = {"error": str(e)[:60]}
-    ok_s1b = bool([r for r in others if r["gamma"] < 1.0 - 1e-12]) or \
-        bool(pers and pers.get("n_gamma_lt_1", 0) > 0)
+    # ⚠️ CLIMATE-FEVER **同样**是逐 claim 算的（视图 = **数据自带的**标注者槽位），
+    # 所以也走「读那个数」这条路，**不并进 `rows`** —— 理由与 Perspectrum 一字不差。
+    from checks import climatefever as CF
+    cf = None
+    if CF.data_file() is not None:
+        try:
+            cf = CF.measure()
+        except Exception as e:
+            cf = {"error": str(e)[:60]}
+    ok_s1b = (bool([r for r in others if r["gamma"] < 1.0 - 1e-12])
+              or bool(pers and pers.get("n_gamma_lt_1", 0) > 0)
+              or bool(cf and cf.get("n_gamma_lt_1", 0) > 0))
     detail = "；".join(f"{r['name']} γ={r['gamma']:.4f}" for r in others)
     if pers and "n_gamma_lt_1" in pers:
         detail += (f"；Perspectrum（逐 claim）**{pers['n_gamma_lt_1']}/"
                    f"{pers['analysable']} 个 γ<1**，min={pers['gamma_min']:.4f}")
+    if cf and "n_gamma_lt_1" in cf:
+        detail += (f"；**CLIMATE-FEVER（逐 claim，视图是数据自带的标注者）"
+                   f"{cf['n_gamma_lt_1']}/{cf['analysable']} 个 γ<1**，"
+                   f"min={cf['gamma_min']:.4f}，且 **{cf['contradictions_independent']} 对"
+                   f"互斥有序对**（两条独立数法同值）")
     out.append(("⭐ S1b 现实性：**非自造材料上有 γ<1** —— MVP 第一步过线",
                 ok_s1b,
                 detail + " —— **至少一份真材料让视图层区分出了"

@@ -28,7 +28,10 @@ ASSERT_GROUPS = ("identity", "interference", "scope", "boundary", "realdata",
                  # **隐式拼成** "indexacceptance" ⇒ 两个模块都不跑，而套件照样绿。
                  # 这是 `LESSONS` 里记过的同一形状（"arena"+"countries"）的**第二次**，
                  # 所以下面 `scope.py` 里加了一条守卫：清单里每组都必须是真实模块。
-                 "index", "acceptance")
+                 "index", "acceptance",
+                 # CLIMATE-FEVER：**第一份自带真实类型化关系的材料**
+                 # （视图 = 数据自带的 5 个标注者槽位）。
+                 "climatefever")
 MEASURE_GROUPS = ("reconstruction", "ablation", "corpus")
 
 

@@ -151,6 +151,8 @@ EXPECTED = {
                # 第二步的**验收**：用真实数据验「视图本身足够支撑检索」。
                # 判据是**往返**：记录 → 键 → 记录。三态（数据不在就跳过）。
                "acceptance",
+               # CLIMATE-FEVER：自带 5 个标注者槽位视图，关系不拍平。
+               "climatefever",
                "index"},
     # ⚠️ `adapters` 是 §十八 要求的边界层。它单列成一个顶层包，
     # **就是那条方向约束的结构形式**：核心不许 import 这一层，
@@ -164,6 +166,9 @@ EXPECTED = {
                  "countries",
                  # 公开数据：Perspectrum（论辩型 —— 原生就含 supports/contradicts 对立，
                  # 这正是 MVP 判据要的形状；事实型知识图谱给不出它）
+                 # CLIMATE-FEVER：公开数据，视图 = 数据自带的标注者槽位；
+                 # ⚠️ 它是逐 claim 分析的，与 Perspectrum 同一条理由。
+                 "climatefever",
                  "perspectrum"},
     # ⚠️ `topology` 是**放进去时才解释的**（这条检查的作用正是逼我解释一句）：
     # 语料库的「骨架长什么样」与「视图怎么构造并植入」是两件事，
