@@ -22,7 +22,13 @@ import sys
 # `corpus` 是**反例扫描**：把每条结论拿到一整片配置上撞一遍。
 ASSERT_GROUPS = ("identity", "interference", "scope", "boundary", "realdata",
                  "positions", "radius", "beta", "approximation", "focus",
-                 "concepts", "nullmodel", "consensus", "countries", "mvp", "perspectrum", "index")
+                 "concepts", "nullmodel", "consensus", "countries", "mvp",
+                 "perspectrum",
+                 # ⚠️ 上一行末尾**少了逗号**时，Python 会把 "index" 与 "acceptance"
+                 # **隐式拼成** "indexacceptance" ⇒ 两个模块都不跑，而套件照样绿。
+                 # 这是 `LESSONS` 里记过的同一形状（"arena"+"countries"）的**第二次**，
+                 # 所以下面 `scope.py` 里加了一条守卫：清单里每组都必须是真实模块。
+                 "index", "acceptance")
 MEASURE_GROUPS = ("reconstruction", "ablation", "corpus")
 
 

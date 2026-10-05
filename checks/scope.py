@@ -148,6 +148,9 @@ EXPECTED = {
                "perspectrum",
                # `index`：第二步索引的检查 —— 四条性质（覆盖/不塌/可枚举/确定性），
                # **全都不需要相似**，所以它们可以在本层被证明。
+               # 第二步的**验收**：用真实数据验「视图本身足够支撑检索」。
+               # 判据是**往返**：记录 → 键 → 记录。三态（数据不在就跳过）。
+               "acceptance",
                "index"},
     # ⚠️ `adapters` 是 §十八 要求的边界层。它单列成一个顶层包，
     # **就是那条方向约束的结构形式**：核心不许 import 这一层，
@@ -301,6 +304,29 @@ def run_all() -> list:
         except Exception as e:                        # noqa: BLE001
             ok, detail = False, f"{type(e).__name__}: {e}"
         out.append((title, ok, detail))
+    # ⚠️ **守卫**：runner 清单里的每一组都必须对应一个真实模块。
+    #
+    # 为什么需要它：`ASSERT_GROUPS` 里**少一个逗号**时，Python 会把两个名字
+    # **隐式拼成一个**（`"index"` + `"acceptance"` ⇒ `"indexacceptance"`），
+    # 于是**两个模块都不跑，而套件照样全绿**。
+    #
+    # 这是同一形状的**第二次**（第一次是 `"arena"` + `"countries"` ⇒ `"arenacountries"`），
+    # 所以这次不留给人眼：**清单与磁盘对不上就是红的。**
+    import pathlib as _pl
+    from checks import ASSERT_GROUPS as _A, MEASURE_GROUPS as _M
+    _here = _pl.Path(__file__).resolve().parent
+    _listed = set(_A) | set(_M)
+    _missing = sorted(g for g in _listed
+                      if not (_here / f"{g}.py").exists())
+    # 同时抓「拼接」：清单里出现磁盘上没有的名字，一定是拼出来的
+    out.append(("守卫：runner 清单里每组都必须是真实模块",
+                not _missing,
+                f"清单 {len(_listed)} 组，全部能在 checks/ 下找到对应文件"
+                if not _missing else
+                f"**清单里有磁盘上没有的名字**：{_missing} —— "
+                "多半是**少了个逗号**被 Python 隐式拼接了（`LESSONS` 记过两次），"
+                "而它的后果是**那两个模块静默不跑、套件照样绿**"))
+
     return out
 
 
