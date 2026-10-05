@@ -153,6 +153,9 @@ EXPECTED = {
                "acceptance",
                # CLIMATE-FEVER：自带 5 个标注者槽位视图，关系不拍平。
                "climatefever",
+               # `_data`：公开数据放哪 —— **一处定义**（`DCE_DATA` /
+               # 仓库旁 `_kgdata/`）。原先五处各写了一遍开发机的绝对路径。
+               "_data",
                "index"},
     # ⚠️ `adapters` 是 §十八 要求的边界层。它单列成一个顶层包，
     # **就是那条方向约束的结构形式**：核心不许 import 这一层，

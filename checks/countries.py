@@ -29,10 +29,13 @@
 """
 
 from __future__ import annotations
+from checks import _data
 
 import pathlib
 
-DATA_DIR = pathlib.Path(r"C:\Users\19253\Desktop\_kgdata")
+# ⚠️ 路径走 `checks/_data.py` 一处定义（原先这里硬编码了开发机的绝对路径，
+# 别人 clone 下来跑不了）。
+DATA_DIR = _data.directory()
 
 
 def data_dir():

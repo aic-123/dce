@@ -28,10 +28,12 @@ Perspectrum 上实测：**752 个可分析 claim 里 134 个 γ<1**（min 0.0769
 """
 
 from __future__ import annotations
+from checks import _data
 
 import pathlib
 
-DATA = pathlib.Path(r"C:\Users\19253\Desktop\_kgdata\perspectrum.json")
+# ⚠️ 走 `checks/_data.py`；**文件不在时是 `None`**，`data_file()` 再兜一层。
+DATA = _data.path("perspectrum.json") or _data.LEGACY / "perspectrum.json"
 
 
 def data_file():

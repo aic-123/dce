@@ -27,10 +27,13 @@ Perspectrum 的视角簇是数据集**预先聚好的**；CLIMATE-FEVER 的 `vot
 """
 
 from __future__ import annotations
+from checks import _data
 
 import pathlib
 
-DATA = pathlib.Path(r"C:\Users\19253\Desktop\_kgdata\climate-fever.jsonl")
+# ⚠️ 走 `checks/_data.py`。
+DATA = (_data.path("climate-fever.jsonl")
+        or _data.LEGACY / "climate-fever.jsonl")
 
 
 def data_file():

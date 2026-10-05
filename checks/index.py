@@ -8,6 +8,7 @@
 """
 
 from __future__ import annotations
+from checks import _data
 
 
 def _materials() -> list:
@@ -31,7 +32,8 @@ def _materials() -> list:
     if CP.data_file() is not None:
         from adapters import perspectrum as PP
         claims, _t = PP.load_claims(CP.DATA)
-        ev = PP.load_pools(r"C:\Users\19253\Desktop\_kgdata", "evidence")
+        d = _data.directory()
+        ev = PP.load_pools(d, "evidence") if d else {}
         for keep in (False, True):
             for cid, cl, _r in claims[:40]:
                 out.append((f"Perspectrum c{cid} keep_labels={keep}",

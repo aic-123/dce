@@ -25,6 +25,7 @@
 而**统计筛选后的子集**只覆盖 33–67%，**不是**本验收的对象。
 """
 from __future__ import annotations
+from checks import _data
 
 #: 视图**声明过**的字段。⑥ 用它重建视图：只留这些，其余一律丢掉。
 VIEW_FIELDS = ("id", "source", "nodes", "edges", "metadata")
@@ -40,7 +41,8 @@ def materials(limit: int = 6) -> list:
         import checks.perspectrum as CP
         if CP.data_file() is not None:
             claims, _ = P.load_claims(CP.DATA)
-            ev = P.load_pools(r"C:\Users\19253\Desktop\_kgdata", "evidence")
+            d = _data.directory()
+            ev = P.load_pools(d, "evidence") if d else {}
             for cid, cl, _r in sorted(claims, key=lambda c: -len(c[1]))[:limit]:
                 out.append((f"Perspectrum c{cid}",
                             P.to_views(cid, cl, claim_text="x", ev_text=ev,

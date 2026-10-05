@@ -231,6 +231,29 @@
     · **shell 会把内容改坏，而改坏之后再去匹配那段内容注定失败**
       （这一轮是**第四次**踩 shell 引号的坑，而这次教训更具体。）
 
+
+    · **`ast.parse` 不是「能导入」——验证比被验证的东西弱，是最难发现的一类**
+
+      把五处硬编码的数据路径改成走 `checks/_data.py` 时，补丁脚本把
+      `from checks import _data` 插到了 `from __future__ import annotations` **之前**：
+
+          from checks import _data
+          from __future__ import annotations     ← 必须在文件最前
+
+      ⇒ 真错误是 `SyntaxError: from __future__ imports must occur at the beginning of the file`，
+        **五个文件全中**。
+
+      ⚠️ **而我的自检当时说的是「语法 OK」。** 因为用的是 `ast.parse` ——
+        它**只建语法树、不做编译期规则检查**，而 `__future__` 的位置是**编译期**规则。
+
+      ⇒ **拿一个更弱的检查当验证，绿灯是真的，结论是假的。**
+        修法：复核改用 `compile(src, path, 'exec')` —— 它跑完整编译。
+        （更彻底的验证是**真的 import 一遍**；本仓库的套件正是这么做的，
+          所以它抓住了，而我的自检没有。）
+
+      ⚠️ 这与「跳过不等于通过」是同一条规矩的第三副面孔：
+        **一个不检查那件事的检查，和一条通过了的检查，在输出上长得一模一样。**
+
     · **隐式字符串拼接：第二次，同一个文件、同一个机制**
 
       往 `ASSERT_GROUPS` 里插新组时**漏了一个逗号**：

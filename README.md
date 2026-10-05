@@ -78,14 +78,27 @@ git clone https://github.com/aic-123/dce.git && cd dce
 python -m checks            # 全部检查。三态：红 / 过 / 跳过 —— **跳过不等于通过**
 python tests/run_tests.py   # 97 条测试
 
-python -m checks.mvp        # 只看「第一步过线了吗」
-python -m checks.index      # 只看索引：四条性质 + 最小依赖集 + 充分性
-python -m checks.acceptance # 只看第二步的验收：真实数据上的往返
+python -m checks.mvp         # 只看「第一步过线了吗」
+python -m checks.index       # 只看索引：四条性质 + 最小依赖集 + 充分性
+python -m checks.acceptance  # 只看第二步的验收：真实数据上的往返
+python -m checks.climatefever # 只看公开数据 CLIMATE-FEVER 的全部读数
 ```
 
 **零依赖**，两个 runner 都自带，不装任何东西就能跑。
-公开数据（`countries`、Perspectrum）**不在仓库里**；缺了相关检查会报**跳过**，
-而报告里「跳过」与「过」**分开写**。
+
+### 公开数据从哪来（不在仓库里）
+
+放在**仓库旁的 `_kgdata/`**，或用 `DCE_DATA=<目录>` 指定（`checks/_data.py` 一处解析）。
+缺了相关检查会报**跳过**，而报告里「跳过」与「过」**分开写** —— **跳过不等于通过**。
+
+| 放到 `_kgdata/` 的文件 | 来源 |
+|---|---|
+| `countries_S1.txt` · `countries_S2.txt` · `countries_S3.txt` | `villmow/datasets_knowledge_embedding` · `other/countries/{S1,S2,S3}/train.txt`（下来后按此改名） |
+| `perspectrum.json` | `CogComp/perspectrum` · `data/dataset/perspectrum_with_answers_v1.0.json` |
+| `climate-fever.jsonl` | `tdiggelm/climate-fever-dataset` · `dataset/climate-fever.jsonl` |
+
+⚠️ 这些路径**原先硬编码在五处**（开发机的绝对路径），别人 clone 下来一个都用不了。
+现在走 `checks/_data.py`：环境变量 → 仓库旁 → 上一级 → 历史路径兜底。
 
 ---
 
@@ -96,10 +109,10 @@ core/         视图 · 边 · 节点 · 溯源                695 行   四条�
 analysis/     共识 · 分歧 · 焦点 · β · 概念格 ·
               合成 · 零模型 · 索引                  2,957 行
 metrics/      覆盖 · 压缩 · 粗糙近似                   373 行
-checks/       检查（含验收）                        5,040 行   **比被检查的层还大**
+checks/       检查（含验收）                        5,254 行   **比被检查的层还大**
 generators/   合成语料 · 拓扑 · 立场材料             1,108 行
 adapters/     scaffold · arena · countries ·
-              perspectrum                           1,055 行   §十八 的边界层
+              perspectrum · climatefever            1,316 行   §十八 的边界层
 tests/        97 条测试                             1,731 行
 ```
 
